@@ -28,6 +28,8 @@ game_path:str = ""
 game_process = None
 is_running = False
 installed = False
+repo_url = "https://github.com/Charmander12345/GameInstaller/archive/refs/heads/main.zip"
+extract_to = "VersionInfo"
 
 def checkGamePath():
     game_path = config.get("Game", "catania_path", fallback="")
@@ -173,6 +175,12 @@ def download_and_extract_github_repo(zip_url, extract_to):
                 files_to_extract = [
                     file for file in zf.namelist() if file.startswith("GameInstaller-main/VersionInfo/")
                 ]
+                # Falls der Ordner bereits existiert, löschen
+                if os.path.exists(extract_to):
+                    print(f"Lösche bestehenden Ordner '{extract_to}'...")
+                    shutil.rmtree(extract_to)
+                # Zielverzeichnis erstellen
+                os.makedirs(extract_to, exist_ok=True)
                 # Dateien extrahieren
                 print(f"Extrahiere {len(files_to_extract)} Dateien...")
                 zf.extractall(extract_to, members=files_to_extract)
@@ -228,9 +236,6 @@ if os.path.exists("VersionInfo"):
         PNDropdown.add_option(option=Versionedit,command=lambda Versionedit=Versionedit: show_patch_notes(Version=Versionedit))
         PNDropdown.add_separator()
 else:
-    os.makedirs("VersionInfo")
-    repo_url = "https://github.com/Charmander12345/GameInstaller/archive/refs/heads/main.zip"
-    extract_to = "VersionInfo"
     download_and_extract_github_repo(repo_url, extract_to)
     UpdatePND()
 
@@ -238,7 +243,7 @@ else:
 SettingsDropdown = CustomDropdownMenu(widget=SettingsButton)
 SettingsDropdown.add_option(option="Game Settings")
 SettingsDropdown.add_separator()
-SettingsDropdown.add_option(option="Launcher Settings")
+SettingsDropdown.add_option(option="Update Version info",command=lambda: download_and_extract_github_repo(repo_url, extract_to))
 SettingsDropdown.add_separator()
 SettingsDropdown.add_option(option="Check game path")
 
