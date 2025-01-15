@@ -1,0 +1,6 @@
+- Added new feature: Automatic game updates
+- Improved user interface for better navigation
+- Fixed bug causing crashes during installation
+- Enhanced security measures for installer
+- Updated game assets for better performance
+- Minor tweaks and optimizations

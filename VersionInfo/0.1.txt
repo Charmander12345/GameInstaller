@@ -1,0 +1,23 @@
+New Features:
+- Added initial game setup and configuration.
+- Implemented main menu with start, options, and exit buttons.
+- Introduced basic character creation and customization.
+- Developed first level with basic enemies and obstacles.
+- Added background music and sound effects.
+
+Improvements:
+- Enhanced user interface for better navigation.
+- Improved loading times and performance optimizations.
+- Refined character animations and movements.
+
+Bug Fixes:
+- Fixed issue with game crashing on startup.
+- Resolved graphical glitches in the main menu.
+- Corrected audio sync issues during gameplay.
+
+Known Issues:
+- Some users may experience minor lag in high-density areas.
+- Occasional clipping of character models in certain animations.
+- Multiplayer mode is currently under development and not available.
+
+Thank you for playing our game! Please report any bugs or feedback to our support team.
