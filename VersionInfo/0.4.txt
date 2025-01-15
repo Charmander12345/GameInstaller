@@ -1,0 +1,22 @@
+This version is mainly focused on visual improvements and progress to map creation.
+UI changes:
+- Implemented functioning graphics, audio and accessibility menus.
+- Implemented localization for those.
+- Implemented a menu which shows up once when opening a new version that displays the most important changes.
+- Added camera effects such as lens flare and water droplets. Those can be toggled in the graphics menu.
+- Added some tooltips to some buttons in the menu. Those can be toggled in the general menu inside the settings.
+- In the accessibility settings you have the option to change the menus font to be a better readable one and also darken menu backgrounds to improve text visibility.
+- Implemented Discord Rich Presence to show activity on Discord.
+NVIDIA DLSS:
+- Implemented NVIDIA DLSS upscaling and frame generation to increase performance. The game should automatically determine whether your pc is capable of these functionalities. This can be found in the game’s graphics menu.
+Map changes
+- Finished the first village with the forest surrounding it.
+- Implemented volumetric fog to replace the 2d fog plane. This is optional and can be toggled in the graphics menu. This feature requires shadow quality to be set to „high“ or above to take effects.
+- Alongside the volumetric fog, ground fog has been added which significantly improves the feeling of the game. When enabled ground fog will be rendered on rainy weather and foggy weather and a little bit on snowy weather. This requires „volumetric fog“ to be enabled.
+The movement system will not be fixed until I implemented the final character for the player since I will have to redo it anyway then and I don’t want to waste time doing that now.
+
+Things to test out:
+- Settings menu is working 
+- New fog effects doesn’t look weird or glitches
+- Improved performance noticeable 
+- Maybe weird looking transitions in the environment with the village or the forest
