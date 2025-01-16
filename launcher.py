@@ -203,6 +203,7 @@ def download_and_extract_github_repo(zip_url, extract_to):
         print(f"Fehler beim Herunterladen: {response.status_code}")
 
 def UpdatePND():
+    download_and_extract_github_repo(repo_url, extract_to)
     if os.path.exists("VersionInfo"):
         PNDropdown = CustomDropdownMenu(widget=PNButton)
         VersionInfofile = os.listdir("VersionInfo")
@@ -236,14 +237,13 @@ if os.path.exists("VersionInfo"):
         PNDropdown.add_option(option=Versionedit,command=lambda Versionedit=Versionedit: show_patch_notes(Version=Versionedit))
         PNDropdown.add_separator()
 else:
-    download_and_extract_github_repo(repo_url, extract_to)
     UpdatePND()
 
 # Settings Dropdown
 SettingsDropdown = CustomDropdownMenu(widget=SettingsButton)
 SettingsDropdown.add_option(option="Game Settings")
 SettingsDropdown.add_separator()
-SettingsDropdown.add_option(option="Update Version info",command=lambda: download_and_extract_github_repo(repo_url, extract_to))
+SettingsDropdown.add_option(option="Update Version info",command=UpdatePND)
 SettingsDropdown.add_separator()
 SettingsDropdown.add_option(option="Check game path")
 
@@ -285,7 +285,7 @@ copy_button = ctk.CTkButton(
     launchframe, 
     image=copy_icon, 
     text="", 
-    command=copy_path, 
+    command=lambda: os.startfile(game_path), 
     width=30, 
     height=30, 
     fg_color="darkgray", 
