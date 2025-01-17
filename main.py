@@ -52,7 +52,7 @@ def uninstall():
         show_main_frame()
         return
     show_progress_frame("Uninstallation in progress...")
-    install_dir = config["Game"]["catania_path"]
+    install_dir = read_from_ini("Game", "catania_path")
     if os.path.exists(install_dir):
         total_files = sum([len(files) for r, d, files in os.walk(install_dir)])
         count = 0
@@ -134,7 +134,7 @@ def checkPath():
         install_button.configure(text="Install", command=install)
         return False
     else:
-        if os.path.exists(config["Game"]["catania_path"]):
+        if os.path.exists(read_from_ini("Game", "catania_path")):
             print("Catania is installed")
             install_button.configure(text="Uninstall", command=uninstall)
             update_button.configure(state="normal")
@@ -143,7 +143,7 @@ def checkPath():
             print("Catania is not installed")
             install_button.configure(text="Install", command=install)
             update_button.configure(state="disabled")
-        return os.path.exists(config["Game"]["catania_path"])
+        return os.path.exists(read_from_ini("Game", "catania_path"))
 
 def create_shortcut(target_path, shortcut_path):
     """Creates a Windows shortcut."""
@@ -163,6 +163,15 @@ def write_to_ini(section, key, value):
     config[section][key] = value
     with open("config.ini", "w") as configfile:
         config.write(configfile)
+
+def read_from_ini(section, key, default_value=""):
+    if section not in config:
+        config[section] = {}
+    if key not in config[section]:
+        config[section][key] = default_value
+        with open("config.ini", "w") as configfile:
+            config.write(configfile)
+    return config[section][key]
 
 #Mainloop
 app.after(1, start)
