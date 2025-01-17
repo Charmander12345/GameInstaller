@@ -31,7 +31,7 @@ window_position.center_window(app, 1000, 600)
 #Microsoft Onedrive
 Tenant_ID = "e26f77c3-1dee-42ba-ae48-7ba44efd4dea"
 Client_ID = "188446fc-2aa3-4557-bf5e-595461d1533d"
-Client_Secret = "XYt8Q~cE~3YCVchHxsjhGEmZnjbWLr3FvS4Kibsy"
+
 
 game_path:str = ""
 game_process = None
