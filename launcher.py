@@ -17,10 +17,20 @@ import zipfile
 import io
 import shutil
 from tkinter import filedialog
+from os.path import exists
 import threading
 
+# Define paths for configuration and version info
+appdata_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'CataniaLauncher')
+config_path = os.path.join(appdata_dir, 'config.ini')
+versioninfo_dir = os.path.join(appdata_dir, 'VersionInfo')
+
+# Ensure the directories exist
+os.makedirs(appdata_dir, exist_ok=True)
+os.makedirs(versioninfo_dir, exist_ok=True)
+
 config = ConfigParser()
-config.read("config.ini")
+config.read(config_path)
 
 app = ctk.CTk()
 app.title("Catania Launcher")
@@ -40,12 +50,13 @@ repo_url = "https://github.com/Charmander12345/GameInstaller/archive/refs/heads/
 extract_to = "VersionInfo"
 
 progress_var = ctk.DoubleVar()
+game_path_var = tk.StringVar(value=game_path)
 
 def write_to_ini(section, key, value):
     if section not in config:
         config[section] = {}
     config[section][key] = value
-    with open("config.ini", "w") as configfile:
+    with open(config_path, "w") as configfile:
         config.write(configfile)
 
 def read_from_ini(section, key, default_value=""):
@@ -53,30 +64,57 @@ def read_from_ini(section, key, default_value=""):
         config[section] = {}
     if key not in config[section]:
         config[section][key] = default_value
-        with open("config.ini", "w") as configfile:
+        with open(config_path, "w") as configfile:
             config.write(configfile)
     return config[section][key]
 
 def checkGamePath():
-    game_path = read_from_ini("Game", "catania_path", os.path.expanduser("~/Catania"))
-    if not game_path:
-        if not os.path.exists(game_path):
-            return False
-        else:
-            if not "Game" in config.sections():
-                config.add_section("Game")
-            write_to_ini("Game", "catania_path", game_path)
-            write_to_ini("Game", "installed", "True")
-        return True
+    """
+    Checks and sets the game installation path.
+
+    This function reads the game path from an INI configuration file. If the path is not found or invalid,
+    it attempts to set a default path and update the configuration file accordingly. It also ensures that
+    the game path exists on the filesystem.
+
+    Returns:
+        bool: True if the game path exists and is valid, False otherwise.
+    """
+    global game_path
+    game_path = os.path.abspath(read_from_ini("Game", "catania_path", default_value=""))
+    if not game_path or not exists(game_path):
+        return False
     else:
-        return os.path.exists(game_path)
+        game_path_var.set(game_path)
+        if "Game" not in config.sections():
+            config.add_section("Game")
+        write_to_ini("Game", "catania_path", game_path)
+        write_to_ini("Game", "installed", "True")
+        return True
 
 def launch_game():
+    """
+    Launches the Catania game if the executable is found.
+
+    This function checks if the game path is valid and attempts to launch the game executable.
+    If the game executable is found, it starts the game process, updates the button text, and minimizes the launcher window.
+    If the game executable is not found, it displays an appropriate error message.
+
+    Global Variables:
+    - game_process: Stores the process of the launched game.
+    - is_running: Boolean flag indicating if the game is currently running.
+
+    Raises:
+    - CTkMessagebox: Displays a message box if the game executable is not found or if the game path is not found.
+
+    Returns:
+    None
+    """
     global game_process
     global is_running
     if checkGamePath():
         game_path = read_from_ini("Game", "catania_path")
         game_executable = os.path.join(game_path, "Catania.exe")
+        print("Launching game from path:", game_executable)
         if os.path.exists(game_executable):
             game_process = subprocess.Popen(game_executable)
             is_running = True
@@ -100,6 +138,24 @@ def launch_game():
             CTkMessagebox(master=app, title="Catania not installed", message= "Game path not found. Please install Catania first.", option_1="OK", icon="warning")
 
 def install_game(action:str = ""):
+    """
+    Handles the installation process of the game.
+
+    Parameters:
+    action (str): The action to be performed. It can be:
+        - "" (default): Checks for user consent and displays the consent frame if not given.
+        - "consent": Records user consent and prompts for the game zip file.
+        - "manual": Skips consent check and directly prompts for the game zip file.
+
+    The function performs the following steps based on the action:
+        - If no action is provided and consent is not given, it displays the consent frame.
+        - If no action is provided and consent is given, it proceeds to the consent action.
+        - If the action is "consent", it records the consent, hides the consent frame, and prompts the user to select the game zip file.
+        - If the action is "manual", it hides the consent frame and prompts the user to select the game zip file, then starts the installation in a separate thread.
+
+    Returns:
+    None
+    """
     consent = read_from_ini("Installer","consent","False")
     if not action:
         if consent == "False":
@@ -120,6 +176,19 @@ def install_game(action:str = ""):
         threading.Thread(target=install_from_zip, args=(zip_path,)).start()
 
 def install_from_zip(zip_path):
+    """
+    Extracts the contents of a ZIP file to a specified directory and updates the installation progress.
+    Args:
+        zip_path (str): The path to the ZIP file to be extracted.
+    Side Effects:
+        - Updates the progress bar and filename display during extraction.
+        - Creates the installation directory if it does not exist.
+        - Writes installation details to an INI file.
+        - Updates the UI buttons after installation.
+    Raises:
+        OSError: If there is an error creating the installation directory.
+        zipfile.BadZipFile: If the ZIP file is corrupt or not a ZIP file.
+    """
     filename.pack(pady=5, padx=5, side="top")
     install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
     filenamevar.set("Extracting files...")
@@ -172,13 +241,11 @@ def update_button_text():
     if is_running:
         if game_process and game_process.poll() is None:  # Process is running
             launch_button.configure(text="Close Game", fg_color="red",hover_color="darkred", command=close_game)
-            ExitButton.configure(state="disabled")
         else:
             app.deiconify()  # Restore the launcher window
             app.lift()  # Bring the launcher window to the front
             app.focus_force()  # Focus the launcher window
             launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
-            ExitButton.configure(state="normal")
             game_process = None
             is_running = False
         app.after(1000, update_button_text)  # Check every second
@@ -189,8 +256,9 @@ def update_buttons():
     global installed
     installed = checkGamePath()
     if installed:
+        if not launch_button.winfo_viewable():
+            launch_button.pack(pady=10, padx=10, side="right")
         launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
-        game_path_var.set(read_from_ini("Game", "catania_path"))
         direntry.pack(pady=10, padx=5, side="left", fill="x", expand=True)
         GameOptions.pack(pady=10, padx=5, side="right")
         copy_button.pack(pady=10, padx=5, side="right")
@@ -217,7 +285,7 @@ def show_patch_notes(Version: str = "0.5"):
 
     # Lade die Patch Notes aus der Datei
     try:
-        with open(f"VersionInfo/{Version}.txt", "r") as file:
+        with open(f"{versioninfo_dir}/{Version}.txt", "r") as file:
             for line in file:
                 ctk.CTkLabel(
                     VersionInfo,
@@ -257,40 +325,40 @@ def download_and_extract_github_repo(zip_url, extract_to):
                 ]
                 total_files = len(files_to_extract)
                 # Falls der Ordner bereits existiert, löschen
-                if os.path.exists(extract_to):
-                    print(f"Lösche bestehenden Ordner '{extract_to}'...")
-                    shutil.rmtree(extract_to)
+                if os.path.exists(versioninfo_dir):
+                    print(f"Lösche bestehenden Ordner '{versioninfo_dir}'...")
+                    shutil.rmtree(versioninfo_dir)
                 # Zielverzeichnis erstellen
-                os.makedirs(extract_to, exist_ok=True)
+                os.makedirs(versioninfo_dir, exist_ok=True)
                 # Dateien extrahieren
                 print(f"Extrahiere {total_files} Dateien...")
                 for i, file in enumerate(files_to_extract):
-                    zf.extract(file, extract_to)
+                    zf.extract(file, versioninfo_dir)
                     progress = (i + 1) / total_files
                     update_progress_popup.update_progress(progress)
                     update_progress_popup.update_label(f"Extracting file {i + 1} of {total_files}...")
                     app.update_idletasks()
 
         # Dateien ins Zielverzeichnis verschieben
-        extracted_dir = os.path.join(extract_to, "GameInstaller-main", "VersionInfo")
+        extracted_dir = os.path.join(versioninfo_dir, "GameInstaller-main", "VersionInfo")
         for root, _, files in os.walk(extracted_dir):
             for file in files:
                 source = os.path.join(root, file)
                 relative_path = os.path.relpath(root, extracted_dir)
-                destination = os.path.join(extract_to, relative_path, file)
+                destination = os.path.join(versioninfo_dir, relative_path, file)
                 os.makedirs(os.path.dirname(destination), exist_ok=True)
                 shutil.move(source, destination)
 
         # Ursprünglichen Ordner löschen
         print("Bereinige temporäre Dateien...")
-        shutil.rmtree(os.path.join(extract_to, "GameInstaller-main"))
-        print(f"Fertig! Dateien wurden in '{extract_to}' entpackt.")
+        shutil.rmtree(os.path.join(versioninfo_dir, "GameInstaller-main"))
+        print(f"Fertig! Dateien wurden in '{versioninfo_dir}' entpackt.")
     else:
         print(f"Fehler beim Herunterladen: {response.status_code}")
 
 def show_update_progress():
     global update_progress_popup
-    update_progress_popup = ctk_components.CTkProgressPopup(app, title="Updating Version Info", label="Please wait...", message="Downloading and extracting files...")
+    update_progress_popup = ctk_components.CTkProgressPopup(app, title="Updating Version Info", label="Please wait...", message="Downloading and extracting files...",side="right_top")
     update_progress_popup.update_progress(0)
     app.update_idletasks()
 
@@ -304,9 +372,9 @@ def UpdatePND():
     show_update_progress()
     download_and_extract_github_repo(repo_url, extract_to)
     hide_update_progress()
-    if os.path.exists("VersionInfo"):
+    if os.path.exists(versioninfo_dir):
         PNDropdown = CustomDropdownMenu(widget=PNButton)
-        VersionInfofile = os.listdir("VersionInfo")
+        VersionInfofile = os.listdir(versioninfo_dir)
         for Version in VersionInfofile:
             Versionedit = Version.replace(".txt","")
             PNDropdown.add_option(option=Versionedit,command=lambda Versionedit=Versionedit: show_patch_notes(Version=Versionedit))
@@ -340,12 +408,65 @@ def on_closing():
 def show_settings():
     settings_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
+def move_game_files(new_path):
+    old_path = read_from_ini("Game", "catania_path")
+    new_game_path = os.path.join(new_path, "CataniaGame")
+    if os.path.exists(old_path): 
+        try:
+            # Hide all elements in the launch frame
+            for widget in launchframe.winfo_children():
+                widget.pack_forget()
+
+            filename.pack(pady=5, padx=5, side="top")
+            install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
+            filenamevar.set("Moving files...")
+
+            os.makedirs(new_game_path, exist_ok=True)
+            total_files = sum([len(files) for r, d, files in os.walk(old_path)])
+            count = 0
+            for root, dirs, files in os.walk(old_path):
+                for name in files:
+                    src_file = os.path.join(root, name)
+                    rel_path = os.path.relpath(src_file, old_path)
+                    dest_file = os.path.join(new_game_path, rel_path)
+                    os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                    shutil.move(src_file, dest_file)
+                    count += 1
+                    progress_var.set(count / total_files)
+                    app.update_idletasks()
+                    time.sleep(0.01)  # Simulate time delay for progress bar update
+
+            # Remove old directory structure
+            shutil.rmtree(old_path)
+
+            write_to_ini("Game", "catania_path", new_game_path)
+            ctk_components.CTkNotification(app, message="Game files moved successfully.", side="right_top")
+        except Exception as e:
+            CTkMessagebox(master=app, title="Error", message=f"Failed to move game files: {e}", option_1="OK", icon="warning")
+        finally:
+            install_progress.pack_forget()
+            filename.pack_forget()
+            update_buttons()
+    else:
+        CTkMessagebox(master=app, title="Error", message="Old game path does not exist.", option_1="OK", icon="warning")
+
+def save_game_path():
+    new_path = game_path_var.get()
+    if os.path.exists(new_path):
+        move_game_files(new_path)
+    else:
+        CTkMessagebox(master=app, title="Invalid Path", message="The specified path does not exist.", option_1="OK", icon="warning")
+
+def select_folder():
+    folder_selected = filedialog.askdirectory()
+    if folder_selected:
+        game_path_var.set(folder_selected)
+
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
 PNButton = menu.add_cascade("Patch Notes")
 SettingsButton = menu.add_cascade("Settings")
 AboutButton = menu.add_cascade("About")
-ExitButton = menu.add_cascade("Exit",command=app.quit)
 
 # Patch Notes
 patch_notes_frame = ctk.CTkFrame(app)
@@ -363,10 +484,27 @@ settings_label.pack(pady=10, padx=10, side="top")
 settings_back_button = ctk.CTkButton(settings_frame, text="Back", command=lambda: settings_frame.pack_forget())
 settings_back_button.pack(pady=10, padx=10, side="bottom")
 
+# Scrollable Frame for Settings
+settings_scrollable_frame = ctk.CTkScrollableFrame(settings_frame)
+settings_scrollable_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
+# Game Path Setting
+game_path_label = ctk.CTkLabel(settings_scrollable_frame, text="Game Path:", anchor="w")
+game_path_label.pack(pady=5, padx=10, fill="x")
+game_path_var = tk.StringVar(value=read_from_ini("Game", "catania_path"))
+game_path_frame = ctk.CTkFrame(settings_scrollable_frame)
+game_path_frame.pack(pady=5, padx=10, fill="x")
+game_path_entry = ctk.CTkEntry(game_path_frame, textvariable=game_path_var)
+game_path_entry.pack(side="left", fill="x", expand=True)
+select_folder_button = ctk.CTkButton(game_path_frame, text="Browse", command=select_folder)
+select_folder_button.pack(side="right")
+save_path_button = ctk.CTkButton(settings_scrollable_frame, text="Save Path", command=save_game_path)
+save_path_button.pack(pady=5, padx=10)
+
 # Patch Notes Dropdown
-if os.path.exists("VersionInfo"):
+if os.path.exists(versioninfo_dir):
     PNDropdown = CustomDropdownMenu(widget=PNButton)
-    VersionInfofile = os.listdir("VersionInfo")
+    VersionInfofile = os.listdir(versioninfo_dir)
     for Version in VersionInfofile:
         Versionedit = Version.replace(".txt","")
         PNDropdown.add_option(option=Versionedit,command=lambda Versionedit=Versionedit: show_patch_notes(Version=Versionedit))
@@ -414,11 +552,7 @@ popup_menu.add_command(label="Update", command=UpdatePND)
 popup_menu.add_command(label="Uninstall", command=uninstall_game)
 
 # Game path entry
-if checkGamePath():
-    game_path = os.path.abspath(read_from_ini("Game", "catania_path"))
-else:
-    game_path = ""
-game_path_var = tk.StringVar(value=game_path)
+checkGamePath()
 direntry = ctk.CTkEntry(launchframe, textvariable=game_path_var, state="readonly")
 
 # Load the icon image
@@ -430,7 +564,7 @@ copy_button = ctk.CTkButton(
     launchframe, 
     image=copy_icon, 
     text="", 
-    command=lambda: os.startfile(game_path), 
+    command=lambda: os.startfile(game_path_var.get()), 
     width=30, 
     height=30, 
     fg_color="darkgray", 
@@ -442,5 +576,5 @@ update_buttons()
 
 app.protocol("WM_DELETE_WINDOW", on_closing)
 app.after(1, update_buttons)
-UpdatePND()
+app.after(1000,lambda: threading.Thread(target=UpdatePND).start())
 app.mainloop()
