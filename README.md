@@ -12,7 +12,6 @@ GameInstaller is a tool designed to simplify the installation process of games d
 
 ## Requirements
 - Windows 10 or higher
-- .NET Framework 4.7.2 or higher
 
 ## Installation
 1. Download the latest version of the GameInstaller from the official website.
