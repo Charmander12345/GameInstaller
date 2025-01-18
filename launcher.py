@@ -19,6 +19,7 @@ import shutil
 from tkinter import filedialog
 from os.path import exists
 import threading
+import webbrowser
 
 # Define paths for configuration and version info
 appdata_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'CataniaLauncher')
@@ -50,7 +51,7 @@ repo_url = "https://github.com/Charmander12345/GameInstaller/archive/refs/heads/
 extract_to = "VersionInfo"
 
 progress_var = ctk.DoubleVar()
-game_path_var = tk.StringVar(value=game_path)
+game_path_var = ctk.StringVar(value=game_path)
 
 def write_to_ini(section, key, value):
     if section not in config:
@@ -80,7 +81,7 @@ def checkGamePath():
         bool: True if the game path exists and is valid, False otherwise.
     """
     global game_path
-    game_path = os.path.abspath(read_from_ini("Game", "catania_path", default_value=""))
+    game_path = read_from_ini("Game", "catania_path", default_value="")
     if not game_path or not exists(game_path):
         return False
     else:
@@ -114,13 +115,13 @@ def launch_game():
     if checkGamePath():
         game_path = read_from_ini("Game", "catania_path")
         game_executable = os.path.join(game_path, "Catania.exe")
-        print("Launching game from path:", game_executable)
         if os.path.exists(game_executable):
             game_process = subprocess.Popen(game_executable)
             is_running = True
             update_button_text()
-            time.sleep(1)  # Wait for the game to start
-            app.iconify()  # Minimize the launcher window
+            if read_from_ini("Settings", "minimize_on_start", "True") == "True":
+                time.sleep(1)  # Wait for the game to start
+                app.iconify()  # Minimize the launcher window
         else:
             CTkMessagebox(master=app, title="Game not found", message= "Couldn't locate the executable.", option_1="OK", icon="warning")
     else:
@@ -130,8 +131,9 @@ def launch_game():
                 game_process = subprocess.Popen(game_executable)
                 is_running = True
                 update_button_text()
-                time.sleep(1)  # Wait for the game to start
-                app.iconify()  # Minimize the launcher window
+                if read_from_ini("Settings", "minimize_on_start", "True") == "True":
+                    time.sleep(1)  # Wait for the game to start
+                    app.iconify()  # Minimize the launcher window
             else:
                 CTkMessagebox(master=app, title="Game not found", message= "Couldn't locate the executable.", option_1="OK", icon="warning")
         else:
@@ -211,40 +213,80 @@ def install_from_zip(zip_path):
     update_buttons()
 
 def close_game():
+    """
+    Closes the running game process if it is active.
+
+    This function attempts to terminate the game process identified by the global variable `game_process`.
+    It iterates through all running processes to find the one matching the PID of `game_process` or the executable name "Catania.exe".
+    If found, it tries to terminate the process gracefully, and if it does not terminate within 5 seconds, it forces the process to kill.
+    Additionally, it terminates any child processes of the game process.
+
+    Globals:
+        game_process (psutil.Process): The process object representing the running game.
+        is_running (bool): A flag indicating whether the game is currently running.
+
+    Side Effects:
+        Updates the global variables `game_process` and `is_running`.
+        Calls `update_button_text()` to update the UI button text.
+
+    Exceptions:
+        Handles `psutil.NoSuchProcess`, `psutil.AccessDenied`, and `psutil.ZombieProcess` exceptions during process termination.
+    """
     global game_process
     global is_running
     if game_process:
-        print("Trying to close game process with PID:", game_process.pid)
         for proc in psutil.process_iter(['pid', 'name', 'exe']):
             try:
                 if proc.info['pid'] == game_process.pid or "Catania.exe" in (proc.info['exe'] or ""):
-                    print("Terminating process:", proc.info)
+                    close_notif = ctk_components.CTkNotification(app, message="Closing the game...", side="right_top")
                     proc.terminate()  # Versuche, den Prozess zu beenden
                     try:
                         proc.wait(timeout=5)  # Warte, bis der Prozess beendet ist
                     except psutil.TimeoutExpired:
-                        print("Process did not terminate in time, forcing kill...")
                         proc.kill()  # Erzwinge die Beendigung
                     # Beende mögliche Kindprozesse
                     for child in proc.children(recursive=True):
                         child.terminate()
                     break
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-                print("Error with process:", e)
+                CTkMessagebox(master=app, title="Error", message=f"Failed to close the game: {e}", option_1="OK", icon="warning")
         game_process = None
         is_running = False
         update_button_text()
+        close_notif.close_notification()
 
 def update_button_text():
+    """
+    Updates the text and appearance of the launch button based on the state of the game process.
+
+    This function checks if the game process is running and updates the launch button's text,
+    color, and command accordingly. If the game is running, the button will allow the user to
+    close the game. If the game is not running, the button will allow the user to launch the game.
+    The function also ensures that the launcher window is brought to the front and focused when
+    the game is not running.
+
+    Globals:
+        game_process: The process object representing the running game.
+        is_running: A boolean indicating whether the game is currently running.
+
+    Side Effects:
+        Modifies the text, color, and command of the launch button.
+        May bring the launcher window to the front and focus it.
+
+    Schedule:
+        This function schedules itself to run again after 1000 milliseconds (1 second) if the game
+        is running.
+    """
     global game_process
     global is_running
     if is_running:
         if game_process and game_process.poll() is None:  # Process is running
-            launch_button.configure(text="Close Game", fg_color="red",hover_color="darkred", command=close_game)
+            launch_button.configure(text="Close Game", fg_color="red",hover_color="darkred", command=lambda: threading.Thread(target=close_game).start())
         else:
-            app.deiconify()  # Restore the launcher window
-            app.lift()  # Bring the launcher window to the front
-            app.focus_force()  # Focus the launcher window
+            if read_from_ini("Settings", "restore_on_exit", "True") == "True":
+                app.deiconify()  # Restore the launcher window
+                app.lift()  # Bring the launcher window to the front
+                app.focus_force()  # Focus the launcher window
             launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
             game_process = None
             is_running = False
@@ -275,9 +317,9 @@ def copy_path():
     CTkMessagebox(master=app, title="Path Copied", message="Game path copied to clipboard.", option_1="OK", icon="info")
 
 def show_patch_notes(Version: str = "0.5"):
+    settings_frame.pack_forget()
     patch_notes_frame.pack(pady=10, padx=10, fill="both", expand=True)
     VersionTitle.configure(text=f"Patch Notes {Version}")
-    print(f"Showing patch notes for version {Version}")
 
     # Entferne vorhandene Widgets in VersionInfo
     for widget in VersionInfo.winfo_children():
@@ -308,11 +350,9 @@ def download_and_extract_github_repo(zip_url, extract_to):
     global progress_var
     global update_progress_popup
     # ZIP-Datei herunterladen
-    print("Lade ZIP-Datei herunter...")
     response = requests.get(zip_url)
     if response.status_code == 200:
         progress_var.set(.5)
-        print("Download erfolgreich!")
         with io.BytesIO(response.content) as zip_file:
             progress_var.set(1)
             # ZIP-Datei öffnen
@@ -326,12 +366,10 @@ def download_and_extract_github_repo(zip_url, extract_to):
                 total_files = len(files_to_extract)
                 # Falls der Ordner bereits existiert, löschen
                 if os.path.exists(versioninfo_dir):
-                    print(f"Lösche bestehenden Ordner '{versioninfo_dir}'...")
                     shutil.rmtree(versioninfo_dir)
                 # Zielverzeichnis erstellen
                 os.makedirs(versioninfo_dir, exist_ok=True)
                 # Dateien extrahieren
-                print(f"Extrahiere {total_files} Dateien...")
                 for i, file in enumerate(files_to_extract):
                     zf.extract(file, versioninfo_dir)
                     progress = (i + 1) / total_files
@@ -350,11 +388,9 @@ def download_and_extract_github_repo(zip_url, extract_to):
                 shutil.move(source, destination)
 
         # Ursprünglichen Ordner löschen
-        print("Bereinige temporäre Dateien...")
         shutil.rmtree(os.path.join(versioninfo_dir, "GameInstaller-main"))
-        print(f"Fertig! Dateien wurden in '{versioninfo_dir}' entpackt.")
     else:
-        print(f"Fehler beim Herunterladen: {response.status_code}")
+        CTkMessagebox(master=app, title="Error", message="Failed to download version info.", option_1="OK", icon="warning")
 
 def show_update_progress():
     global update_progress_popup
@@ -406,6 +442,7 @@ def on_closing():
         app.destroy()
 
 def show_settings():
+    patch_notes_frame.pack_forget()
     settings_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def move_game_files(new_path):
@@ -462,6 +499,22 @@ def select_folder():
     if folder_selected:
         game_path_var.set(folder_selected)
 
+def toggle_minimize_on_start():
+    current_value = read_from_ini("Settings", "minimize_on_start", "True")
+    new_value = "False" if current_value == "True" else "True"
+    write_to_ini("Settings", "minimize_on_start", new_value)
+
+def toggle_restore_on_exit():
+    current_value = read_from_ini("Settings", "restore_on_exit", "True")
+    new_value = "False" if current_value == "True" else "True"
+    write_to_ini("Settings", "restore_on_exit", new_value)
+
+def show_onedrive_info():
+    onedrive_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
+def hide_onedrive_info():
+    onedrive_info_frame.pack_forget()
+
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
 PNButton = menu.add_cascade("Patch Notes")
@@ -501,6 +554,16 @@ select_folder_button.pack(side="right")
 save_path_button = ctk.CTkButton(settings_scrollable_frame, text="Save Path", command=save_game_path)
 save_path_button.pack(pady=5, padx=10)
 
+# Minimize on Start Setting
+minimize_on_start_var = tk.StringVar(value=read_from_ini("Settings", "minimize_on_start", "True"))
+minimize_on_start_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Minimize on Game Start", variable=minimize_on_start_var, onvalue="True", offvalue="False", command=toggle_minimize_on_start)
+minimize_on_start_checkbox.pack(pady=5, padx=10)
+
+# Restore on Exit Setting
+restore_on_exit_var = tk.StringVar(value=read_from_ini("Settings", "restore_on_exit", "True"))
+restore_on_exit_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Restore on Game Exit", variable=restore_on_exit_var, onvalue="True", offvalue="False", command=toggle_restore_on_exit)
+restore_on_exit_checkbox.pack(pady=5, padx=10)
+
 # Patch Notes Dropdown
 if os.path.exists(versioninfo_dir):
     PNDropdown = CustomDropdownMenu(widget=PNButton)
@@ -519,6 +582,38 @@ SettingsDropdown.add_separator()
 SettingsDropdown.add_option(option="Update Version info",command=lambda: threading.Thread(target=UpdatePND).start())
 SettingsDropdown.add_separator()
 SettingsDropdown.add_option(option="Check game path")
+
+# Onedrive Info Frame
+onedrive_info_frame = ctk.CTkFrame(app)
+onedrive_info_title = ctk.CTkLabel(onedrive_info_frame, text="OneDrive Access", font=("Arial", 20))
+onedrive_info_title.pack(pady=10, padx=10, side="top")
+onedrive_info_text = ctk.CTkLabel(onedrive_info_frame, text="This app needs access to your OneDrive to locate and download the game files. You will be redirected to Microsoft to sign in and grant this permission. The app does not store your login details.\n The app also does not directly access your OneDrive. The permission is rather to check if you have permission to view the Folder. The launcher does not get to see any contents of your OneDrive nor can it request any of your personal data.\nFor more information, visit our GitHub repository:", wraplength=500, justify="center")
+onedrive_info_text.pack(pady=10, padx=10, side="top")
+
+def open_github_repo():
+    webbrowser.open("https://github.com/Charmander12345/GameInstaller")
+
+github_button = ctk.CTkButton(onedrive_info_frame, text="GitHub Repository", command=open_github_repo)
+github_button.pack(pady=10, padx=10, side="top")
+onedrive_info_text.pack(pady=10, padx=10, side="top")
+onedrive_info_back_button = ctk.CTkButton(onedrive_info_frame, text="Back", command=hide_onedrive_info)
+onedrive_info_back_button.pack(pady=10, padx=10, side="bottom")
+
+# About Dropdown
+AboutDropdown = CustomDropdownMenu(widget=AboutButton)
+AboutDropdown.add_option(option="About the game")
+AboutDropdown.add_separator()
+launcher_submenu = AboutDropdown.add_submenu(submenu_name="About the launcher")
+launcher_submenu.add_option(option="Info", command=lambda: CTkMessagebox(master=app, title="Launcher Version", message="Version 1.0.0", option_1="OK", icon="info"))
+launcher_submenu.add_separator()
+launcher_submenu.add_option(option="Author", command=lambda: CTkMessagebox(master=app, title="Author", message="Developed by Horizon Creations", option_1="OK", icon="info"))
+launcher_submenu.add_separator()
+
+# Data & Safety Submenu
+data_safety_submenu = launcher_submenu.add_submenu(submenu_name="Data & Safety")
+data_safety_submenu.add_option(option="OneDrive", command=show_onedrive_info)
+data_safety_submenu.add_separator()
+data_safety_submenu.add_option(option="License", command=lambda: CTkMessagebox(master=app, title="License", message="MIT License", option_1="OK", icon="info"))
 
 # Consent
 consentframe = ctk.CTkFrame(app)
@@ -559,17 +654,7 @@ direntry = ctk.CTkEntry(launchframe, textvariable=game_path_var, state="readonly
 base_dir = os.path.dirname(os.path.abspath(__file__))
 copy_icon_path = os.path.join(base_dir, "icons/copy/Light.png")
 copy_icon = ctk.CTkImage(Image.open(copy_icon_path))
-
-copy_button = ctk.CTkButton(
-    launchframe, 
-    image=copy_icon, 
-    text="", 
-    command=lambda: os.startfile(game_path_var.get()), 
-    width=30, 
-    height=30, 
-    fg_color="darkgray", 
-    hover_color="gray"
-)
+copy_button = ctk.CTkButton(launchframe, image=copy_icon, text="", command=lambda: os.startfile(game_path_var.get()), width=30, height=30, fg_color="darkgray", hover_color="gray")
 
 # Initial state
 update_buttons()
