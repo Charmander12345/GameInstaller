@@ -46,6 +46,7 @@ Client_ID = "188446fc-2aa3-4557-bf5e-595461d1533d"
 game_path:str = ""
 game_process = None
 is_running = False
+is_updating = False
 installed = False
 repo_url = "https://github.com/Charmander12345/GameInstaller/archive/refs/heads/main.zip"
 extract_to = "VersionInfo"
@@ -175,9 +176,41 @@ def install_game(action:str = ""):
         zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
         if not zip_path:
             return
+        launch_button.pack_forget()
         threading.Thread(target=install_from_zip, args=(zip_path,)).start()
 
-def install_from_zip(zip_path):
+def update_game():
+    global is_updating
+    zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
+    if not zip_path:
+        return
+    is_updating = True
+    launch_button.pack_forget()
+    GameOptions.pack_forget()
+    copy_button.pack_forget()
+    direntry.pack_forget()
+    filename.pack(pady=5, padx=5, side="top")
+    install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
+    filenamevar.set("Deleteing old files...")
+
+    #uninstall the game
+    install_dir = read_from_ini("Game", "catania_path")
+    if os.path.exists(install_dir):
+        for root, dirs, files in os.walk(install_dir, topdown=False):
+            total_files = len(files)
+            for name in files:
+                os.remove(os.path.join(root, name))
+                progress_var.set((files.index(name) + 1) / total_files)
+            for name in dirs:
+                os.rmdir(os.path.join(root, name))
+        os.rmdir(install_dir)
+    filenamevar.set("Installing new files...")
+    progress_var.set(0)
+    install_from_zip(zip_path,read_from_ini("Game", "catania_path"))
+    ctk_components.CTkNotification(app, message="Game updated successfully.", side="right_top")
+    is_updating = False
+
+def install_from_zip(zip_path,OWinstall_dir = ""):
     """
     Extracts the contents of a ZIP file to a specified directory and updates the installation progress.
     Args:
@@ -194,7 +227,10 @@ def install_from_zip(zip_path):
     filename.pack(pady=5, padx=5, side="top")
     install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
     filenamevar.set("Extracting files...")
-    install_dir = os.path.expanduser("~/Catania")
+    if OWinstall_dir:
+        install_dir = OWinstall_dir
+    else:
+        install_dir = os.path.expanduser("~/Catania")
     os.makedirs(install_dir, exist_ok=True)
 
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -295,6 +331,25 @@ def update_button_text():
         launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
 
 def update_buttons():
+    """
+    Updates the state and visibility of various buttons in the game installer UI based on whether the game is installed.
+
+    This function checks if the game is installed by calling `checkGamePath()`. Depending on the result, it updates the 
+    text, colors, and commands of the `launch_button`, and manages the visibility of `direntry`, `GameOptions`, and 
+    `copy_button`.
+
+    If the game is installed:
+        - Displays the `launch_button` with text "Launch Catania" and green colors.
+        - Packs `direntry`, `GameOptions`, and `copy_button` with specified padding and alignment.
+
+    If the game is not installed:
+        - Configures the `launch_button` with text "Install Catania" and blue colors.
+        - Hides `direntry`, `GameOptions`, and `copy_button`.
+
+    Globals:
+        installed (bool): Indicates whether the game is installed.
+
+    """
     global installed
     installed = checkGamePath()
     if installed:
@@ -317,6 +372,21 @@ def copy_path():
     CTkMessagebox(master=app, title="Path Copied", message="Game path copied to clipboard.", option_1="OK", icon="info")
 
 def show_patch_notes(Version: str = "0.5"):
+    """
+    Displays the patch notes for the specified version in the patch notes frame.
+    Args:
+        Version (str): The version number of the patch notes to display. Defaults to "0.5".
+    Behavior:
+        - Hides the settings frame.
+        - Displays the patch notes frame.
+        - Updates the title of the patch notes with the specified version.
+        - Clears any existing widgets in the VersionInfo frame.
+        - Loads and displays the patch notes from a file corresponding to the specified version.
+        - If the file is not found, displays an error message indicating that the patch notes file was not found.
+    Note:
+        The patch notes are expected to be stored in text files named with the version number (e.g., "0.5.txt") 
+        in the directory specified by `versioninfo_dir`.
+    """
     settings_frame.pack_forget()
     patch_notes_frame.pack(pady=10, padx=10, fill="both", expand=True)
     VersionTitle.configure(text=f"Patch Notes {Version}")
@@ -344,7 +414,6 @@ def show_patch_notes(Version: str = "0.5"):
             anchor="w",
             justify="left"
         ).pack(pady=2, padx=5, side="top")
-
 
 def download_and_extract_github_repo(zip_url, extract_to):
     global progress_var
@@ -438,6 +507,8 @@ def show_popup_menu(event):
 def on_closing():
     if is_running:
         CTkMessagebox(master=app, title="Game Running", message="Please close the game before exiting the launcher.", option_1="OK", icon="warning")
+    elif is_updating:
+        CTkMessagebox(master=app, title="Update in Progress", message="Please wait for the update to complete before exiting the launcher.", option_1="OK", icon="warning")
     else:
         app.destroy()
 
@@ -510,6 +581,8 @@ def toggle_restore_on_exit():
     write_to_ini("Settings", "restore_on_exit", new_value)
 
 def show_onedrive_info():
+    patch_notes_frame.pack_forget()
+    settings_frame.pack_forget()
     onedrive_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def hide_onedrive_info():
@@ -555,12 +628,12 @@ save_path_button = ctk.CTkButton(settings_scrollable_frame, text="Save Path", co
 save_path_button.pack(pady=5, padx=10)
 
 # Minimize on Start Setting
-minimize_on_start_var = tk.StringVar(value=read_from_ini("Settings", "minimize_on_start", "True"))
+minimize_on_start_var = ctk.StringVar(value=read_from_ini("Settings", "minimize_on_start", "True"))
 minimize_on_start_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Minimize on Game Start", variable=minimize_on_start_var, onvalue="True", offvalue="False", command=toggle_minimize_on_start)
 minimize_on_start_checkbox.pack(pady=5, padx=10)
 
 # Restore on Exit Setting
-restore_on_exit_var = tk.StringVar(value=read_from_ini("Settings", "restore_on_exit", "True"))
+restore_on_exit_var = ctk.StringVar(value=read_from_ini("Settings", "restore_on_exit", "True"))
 restore_on_exit_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Restore on Game Exit", variable=restore_on_exit_var, onvalue="True", offvalue="False", command=toggle_restore_on_exit)
 restore_on_exit_checkbox.pack(pady=5, padx=10)
 
@@ -580,8 +653,6 @@ SettingsDropdown = CustomDropdownMenu(widget=SettingsButton)
 SettingsDropdown.add_option(option="Launcher Settings", command=show_settings)
 SettingsDropdown.add_separator()
 SettingsDropdown.add_option(option="Update Version info",command=lambda: threading.Thread(target=UpdatePND).start())
-SettingsDropdown.add_separator()
-SettingsDropdown.add_option(option="Check game path")
 
 # Onedrive Info Frame
 onedrive_info_frame = ctk.CTkFrame(app)
@@ -591,7 +662,7 @@ onedrive_info_text = ctk.CTkLabel(onedrive_info_frame, text="This app needs acce
 onedrive_info_text.pack(pady=10, padx=10, side="top")
 
 def open_github_repo():
-    webbrowser.open("https://github.com/Charmander12345/GameInstaller")
+    webbrowser.open("https://github.com/Charmander12345/GameInstaller", new=2)
 
 github_button = ctk.CTkButton(onedrive_info_frame, text="GitHub Repository", command=open_github_repo)
 github_button.pack(pady=10, padx=10, side="top")
@@ -638,12 +709,12 @@ GameOptions = ctk.CTkButton(launchframe, image=dots, text="", width=20, height=3
 GameOptions.pack(pady=10, padx=5, side="right")
 GameOptions.bind("<Button-1>", show_popup_menu)
 install_progress = ctk.CTkProgressBar(launchframe, variable=progress_var)
-filenamevar = tk.StringVar()
+filenamevar = ctk.StringVar()
 filename = ctk.CTkLabel(launchframe, textvariable=filenamevar,anchor="w",justify="left")
 
 # Popup Menu
 popup_menu = tk.Menu(app, tearoff=0)
-popup_menu.add_command(label="Update", command=UpdatePND)
+popup_menu.add_command(label="Update", command=lambda: threading.Thread(target=update_game).start())
 popup_menu.add_command(label="Uninstall", command=uninstall_game)
 
 # Game path entry
