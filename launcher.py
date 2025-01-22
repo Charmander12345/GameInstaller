@@ -20,6 +20,11 @@ from tkinter import filedialog
 from os.path import exists
 import threading
 import webbrowser
+from ftplib import FTP, error_perm, error_temp, error_proto, error_reply
+import socket
+from cpuinfo import get_cpu_info
+import psutil
+import GPUtil
 
 # Define paths for configuration and version info
 appdata_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'CataniaLauncher')
@@ -42,6 +47,11 @@ window_position.center_window(app, 1000, 600)
 #Microsoft Onedrive
 Tenant_ID = "e26f77c3-1dee-42ba-ae48-7ba44efd4dea"
 Client_ID = "188446fc-2aa3-4557-bf5e-595461d1533d"
+
+#FTP
+FTP_HOST = "deinname.o2internet.de"
+FTP_USER = "ftpuser"
+FTP_PASS = "DEIN_PASSWORT"
 
 game_path:str = ""
 game_process = None
@@ -142,35 +152,23 @@ def launch_game():
 
 def install_game(action:str = ""):
     """
-    Handles the installation process of the game.
-
+    Handles the installation process of the game based on the provided action.
     Parameters:
-    action (str): The action to be performed. It can be:
-        - "" (default): Checks for user consent and displays the consent frame if not given.
-        - "consent": Records user consent and prompts for the game zip file.
-        - "manual": Skips consent check and directly prompts for the game zip file.
-
-    The function performs the following steps based on the action:
-        - If no action is provided and consent is not given, it displays the consent frame.
-        - If no action is provided and consent is given, it proceeds to the consent action.
-        - If the action is "consent", it records the consent, hides the consent frame, and prompts the user to select the game zip file.
-        - If the action is "manual", it hides the consent frame and prompts the user to select the game zip file, then starts the installation in a separate thread.
-
+    action (str): The action to be performed. It can be one of the following:
+        - "" (default): Checks the consent status and either shows the consent frame or proceeds with installation.
+        - "consent": Writes consent to the INI file, hides the consent frame, and starts the game version retrieval process.
+        - "manual": Hides the consent frame, prompts the user to select a zip file, and starts the installation from the selected zip file.
     Returns:
     None
     """
-    consent = read_from_ini("Installer","consent","False")
-    if not action:
-        if consent == "False":
-            consentframe.pack(pady=10, padx=10, fill="both", expand=True)
-        else:
-            install_game(action="consent")
-    elif action == "consent":
+    if action == "consent":
+        print("installing game with Launcher")
         write_to_ini("Installer","consent","True")
         consentframe.pack_forget()
-        zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
-        if not zip_path:
-            return
+        threading.Thread(target=get_GameVersions).start()
+        abc = ctk_components.CTkNotification(app,message="Logging in...",side="right_top")
+        time.sleep(2)
+        abc.close_notification()
     elif action == "manual":
         consentframe.pack_forget()
         zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
@@ -178,6 +176,8 @@ def install_game(action:str = ""):
             return
         launch_button.pack_forget()
         threading.Thread(target=install_from_zip, args=(zip_path,)).start()
+    else:
+        consentframe.pack(pady=10, padx=10, fill="both", expand=True)
 
 def update_game():
     global is_updating
@@ -356,14 +356,21 @@ def update_buttons():
         if not launch_button.winfo_viewable():
             launch_button.pack(pady=10, padx=10, side="right")
         launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
+        select_folder_button.configure(state="normal")
+        save_path_button.configure(state="normal")
         direntry.pack(pady=10, padx=5, side="left", fill="x", expand=True)
         GameOptions.pack(pady=10, padx=5, side="right")
         copy_button.pack(pady=10, padx=5, side="right")
+        requirements_label.pack_forget()
     else:
         launch_button.configure(text="Install Catania",fg_color="#3B8ED0",hover_color="#36719F",command=install_game)
+        save_path_button.configure(state="disabled")
+        select_folder_button.configure(state="disabled")
         direntry.pack_forget()
         copy_button.pack_forget()
         GameOptions.pack_forget()
+        requirements_label.pack(pady=10, padx=10, side="top")
+        threading.Thread(target=check_system_requirements).start()
 
 def copy_path():
     app.clipboard_clear()
@@ -514,6 +521,7 @@ def on_closing():
 
 def show_settings():
     patch_notes_frame.pack_forget()
+    onedrive_info_frame.pack_forget()
     settings_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def move_game_files(new_path):
@@ -588,6 +596,90 @@ def show_onedrive_info():
 def hide_onedrive_info():
     onedrive_info_frame.pack_forget()
 
+def open_github_repo():
+    webbrowser.open("https://github.com/Charmander12345/GameInstaller", new=2)
+
+def get_GameVersions():
+    try:
+        ftp = FTP(FTP_HOST)
+        ftp.login(FTP_USER,FTP_PASS)
+        availableVersions = ftp.nlst()
+        # Handle the available versions as needed
+    except error_perm:
+        x = ctk_components.CTkNotification(app,"warning2","Unable to login to game build server.","right_top")
+        time.sleep(2)
+        if x.winfo_viewable:
+            x.close_notification()
+    except socket.gaierror:
+        x = ctk_components.CTkNotification(app,"warning","The IP address of the game build server could not be resolved.","right_top")
+        time.sleep(2)
+        if x.winfo_viewable:
+            x.close_notification()
+    except error_temp:
+        x = ctk_components.CTkNotification(app,"warning2","Temporary problem on the server.","right_top")
+        time.sleep(2)
+        if x.winfo_viewable:
+            x.close_notification()
+    except error_reply:
+        x = ctk_components.CTkNotification(app,"warning","Unexpected response from game build server.","right_top")
+        time.sleep(2)
+        if x.winfo_viewable:
+            x.close_notification()
+    except TimeoutError:
+        x = ctk_components.CTkNotification(app,"warning","Timeout while attempting to connect.","right_top")
+        time.sleep(2)
+        if x.winfo_viewable:
+            x.close_notification()
+
+def check_system_requirements():
+    # RAM-Mindestanforderungen
+    min_ram = 16 * 1024**3  # 16 GB in Bytes
+
+    # Vollständige Listen mit unterstützten Komponenten
+    supported_cpus = [
+        # AMD CPUs
+        "Ryzen 5 3600X", "Ryzen 5 5600", "Ryzen 5 5600X", "Ryzen 7 3700X", "Ryzen 7 3800X",
+        "Ryzen 7 5700X", "Ryzen 9 3900X", "Ryzen 9 3950X", "Ryzen 9 5900X", "Ryzen 9 5950X",
+        "Ryzen 5 7600", "Ryzen 7 7700X", "Ryzen 9 7900X",
+        # Intel CPUs
+        "Core i5-10600K", "Core i5-11600K", "Core i5-12600K", "Core i7-10700K", "Core i7-11700K",
+        "Core i7-12700K", "Core i7-13700K", "Core i9-10850K", "Core i9-10900K", "Core i9-11900K",
+        "Core i9-12900K", "Core i9-13900K", "Core i5-13600K", "Core i7-14700K", "Core i9-14900K"
+    ]
+    
+    supported_gpus = [
+        # NVIDIA GPUs
+        "RTX 3060", "RTX 3060 Ti", "RTX 3070", "RTX 3070 Ti", "RTX 3080", "RTX 3080 Ti", "RTX 3090",
+        "RTX 3090 Ti", "RTX 4060", "RTX 4060 Ti", "RTX 4070", "RTX 4070 Ti", "RTX 4080", "RTX 4090",
+        # AMD GPUs
+        "RX 6600", "RX 6600 XT", "RX 6650 XT", "RX 6700 XT", "RX 6750 XT", "RX 6800", "RX 6800 XT",
+        "RX 6900 XT", "RX 6950 XT", "RX 7600", "RX 7700 XT", "RX 7800 XT", "RX 7900 XT", "RX 7900 XTX",
+        # Intel GPUs
+        "Arc A750", "Arc A770"
+    ]
+
+    # RAM überprüfen
+    ram = psutil.virtual_memory().total
+    if ram < min_ram:
+        requirements_label.configure(text=f"Your system does not meet the minimum RAM requirements. Required: 16 GB, Found: {ram / 1024**3:.2f} GB.")
+        return
+
+    # CPU überprüfen
+    cpu_info = get_cpu_info()
+    cpu_name = cpu_info['brand_raw']
+    if not any(cpu in cpu_name for cpu in supported_cpus):
+        requirements_label.configure(text=f"Your CPU does not meet the minimum requirements. You may experience performance issues.")
+        return
+
+    # GPU überprüfen
+    gpus = GPUtil.getGPUs()
+    if not any(any(gpu in gpu_info.name for gpu in supported_gpus) for gpu_info in gpus):
+        requirements_label.configure(text="Your GPU does not meet the minimum requirements. You may experience performance issues.")
+        return
+
+    requirements_label.configure(text="Your system meets the minimum requirements.")
+    return
+
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
 PNButton = menu.add_cascade("Patch Notes")
@@ -661,9 +753,6 @@ onedrive_info_title.pack(pady=10, padx=10, side="top")
 onedrive_info_text = ctk.CTkLabel(onedrive_info_frame, text="This app needs access to your OneDrive to locate and download the game files. You will be redirected to Microsoft to sign in and grant this permission. The app does not store your login details.\n The app also does not directly access your OneDrive. The permission is rather to check if you have permission to view the Folder. The launcher does not get to see any contents of your OneDrive nor can it request any of your personal data.\nFor more information, visit our GitHub repository:", wraplength=500, justify="center")
 onedrive_info_text.pack(pady=10, padx=10, side="top")
 
-def open_github_repo():
-    webbrowser.open("https://github.com/Charmander12345/GameInstaller", new=2)
-
 github_button = ctk.CTkButton(onedrive_info_frame, text="GitHub Repository", command=open_github_repo)
 github_button.pack(pady=10, padx=10, side="top")
 onedrive_info_text.pack(pady=10, padx=10, side="top")
@@ -688,9 +777,9 @@ data_safety_submenu.add_option(option="License", command=lambda: CTkMessagebox(m
 
 # Consent
 consentframe = ctk.CTkFrame(app)
-consenttext = ctk.CTkLabel(consentframe,text="If you install the game using the launcher, you will be redirected to microsoft to sing in and allow this app to access your OneDrive. This app cannot collect your login data during login process. OneDrive access is only used to locate the game files and request them from the API. If you do not wish for the app to do this you can download the zip file manually from OneDrive and let the launcher install a predownloaded Version.",wraplength=500,justify="center")
+consenttext = ctk.CTkLabel(consentframe,text="The Launcher can download the game from a dedicated server. If you already habe a downloaded zip file from the OneDrive folder you can use the Launcher to install that.",wraplength=500,justify="center")
 consenttext.pack(pady=10, padx=10, side="top")
-consentbutton = ctk.CTkButton(consentframe,text="I agree",command=lambda: install_game("consent"))
+consentbutton = ctk.CTkButton(consentframe,text="Launcher download",command=lambda: threading.Thread(target=install_game("consent")).start())
 consentbutton.pack(pady=10, padx=10, side="bottom")
 manualbutton = ctk.CTkButton(consentframe,text="Install manually",command=lambda: install_game("manual"))
 manualbutton.pack(pady=10, padx=10, side="bottom")
@@ -711,6 +800,7 @@ GameOptions.bind("<Button-1>", show_popup_menu)
 install_progress = ctk.CTkProgressBar(launchframe, variable=progress_var)
 filenamevar = ctk.StringVar()
 filename = ctk.CTkLabel(launchframe, textvariable=filenamevar,anchor="w",justify="left")
+requirements_label = ctk.CTkLabel(launchframe, text="Checking system requirements...", anchor="w", justify="left")
 
 # Popup Menu
 popup_menu = tk.Menu(app, tearoff=0)
@@ -718,7 +808,6 @@ popup_menu.add_command(label="Update", command=lambda: threading.Thread(target=u
 popup_menu.add_command(label="Uninstall", command=uninstall_game)
 
 # Game path entry
-checkGamePath()
 direntry = ctk.CTkEntry(launchframe, textvariable=game_path_var, state="readonly")
 
 # Load the icon image
@@ -727,10 +816,7 @@ copy_icon_path = os.path.join(base_dir, "icons/copy/Light.png")
 copy_icon = ctk.CTkImage(Image.open(copy_icon_path))
 copy_button = ctk.CTkButton(launchframe, image=copy_icon, text="", command=lambda: os.startfile(game_path_var.get()), width=30, height=30, fg_color="darkgray", hover_color="gray")
 
-# Initial state
-update_buttons()
-
 app.protocol("WM_DELETE_WINDOW", on_closing)
-app.after(1, update_buttons)
+app.after(100, update_buttons)
 app.after(1000,lambda: threading.Thread(target=UpdatePND).start())
 app.mainloop()
