@@ -132,6 +132,7 @@ def launch_game():
             game_process = subprocess.Popen(game_executable)
             is_running = True
             update_button_text()
+            show_main_screen()
             if read_from_ini("Settings", "minimize_on_start", "True") == "True":
                 time.sleep(1)  # Wait for the game to start
                 app.iconify()  # Minimize the launcher window
@@ -332,6 +333,7 @@ def update_button_text():
         app.after(1000, update_button_text)  # Check every second
     else:
         launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
+        show_main_screen()
 
 def update_buttons():
     """
@@ -566,11 +568,16 @@ def show_main_screen():
     if not installed:
         requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
     else:
-        print("Installed")
         requirements_frame.pack_forget()
         game_info = get_game_info()
         game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
         game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
+        if is_running:
+            game_info_frame.pack_forget()
+            usage_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
+            update_usage_info()
+        else:
+            usage_info_frame.pack_forget()
 
 def show_settings():
     """
@@ -581,6 +588,7 @@ def show_settings():
     launcher_info_frame.pack_forget()
     requirements_frame.pack_forget()
     game_info_frame.pack_forget()
+    usage_info_frame.pack_forget()
     settings_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def show_launcher_info():
@@ -592,6 +600,7 @@ def show_launcher_info():
     onedrive_info_frame.pack_forget()
     requirements_frame.pack_forget()
     game_info_frame.pack_forget()
+    usage_info_frame.pack_forget()
     launcher_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def show_install_info():
@@ -604,6 +613,7 @@ def show_install_info():
     requirements_frame.pack_forget()
     launcher_info_frame.pack_forget()
     game_info_frame.pack_forget()
+    usage_info_frame.pack_forget()
     consentframe.pack(pady=10, padx=10, fill="both", expand=True)
 
 def move_game_files(new_path):
@@ -643,7 +653,7 @@ def move_game_files(new_path):
             CTkMessagebox(master=app, title="Error", message=f"Failed to move game files: {e}", option_1="OK", icon="warning")
         finally:
             install_progress.pack_forget()
-            filename.pack.forget()
+            filename.pack_forget()
             update_buttons()
     else:
         CTkMessagebox(master=app, title="Error", message="Old game path does not exist.", option_1="OK", icon="warning")
@@ -704,6 +714,19 @@ def get_GameVersions():
         time.sleep(2)
         if x.winfo_viewable:
             x.close_notification()
+
+def update_usage_info():
+    """
+    Updates the usage information for GPU, CPU, and RAM.
+    """
+    if is_running:
+        cpu_usage = psutil.cpu_percent()
+        ram_usage = psutil.virtual_memory().percent
+        gpus = GPUtil.getGPUs()
+        gpu_usage = gpus[0].load * 100 if gpus else 0
+
+        usage_info_text.set(f"CPU Usage: {cpu_usage}%\nRAM Usage: {ram_usage}%\nGPU Usage: {gpu_usage}%")
+        app.after(1000, update_usage_info)  # Update every second
 
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
@@ -865,6 +888,15 @@ game_info = get_game_info()
 game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
 game_info_details = ctk.CTkLabel(game_info_frame, textvariable=game_info_text, justify="left", anchor="w")
 game_info_details.pack(pady=10, padx=10, side="top")
+
+# Usage Info Frame
+usage_info_frame = ctk.CTkFrame(app)
+usage_info_label = ctk.CTkLabel(usage_info_frame, text="System Usage Information", font=("Arial", 20))
+usage_info_label.pack(pady=10, padx=10, side="top")
+
+usage_info_text = tk.StringVar()
+usage_info_details = ctk.CTkLabel(usage_info_frame, textvariable=usage_info_text, justify="left", anchor="w")
+usage_info_details.pack(pady=10, padx=10, side="top")
 
 # About Dropdown
 AboutDropdown = CustomDropdownMenu(widget=AboutButton)
