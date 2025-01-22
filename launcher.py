@@ -26,6 +26,8 @@ from cpuinfo import get_cpu_info
 import psutil
 import GPUtil
 
+ctk.set_appearance_mode("dark")
+
 # Define paths for configuration and version info
 appdata_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'CataniaLauncher')
 config_path = os.path.join(appdata_dir, 'config.ini')
@@ -164,20 +166,21 @@ def install_game(action:str = ""):
     if action == "consent":
         print("installing game with Launcher")
         write_to_ini("Installer","consent","True")
-        consentframe.pack_forget()
+        show_main_screen()
         threading.Thread(target=get_GameVersions).start()
         abc = ctk_components.CTkNotification(app,message="Logging in...",side="right_top")
         time.sleep(2)
         abc.close_notification()
     elif action == "manual":
-        consentframe.pack_forget()
+        show_main_screen()
         zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
         if not zip_path:
+            ctk_components.CTkNotification(app, message="No zip file selected.", side="right_top")
             return
         launch_button.pack_forget()
         threading.Thread(target=install_from_zip, args=(zip_path,)).start()
     else:
-        consentframe.pack(pady=10, padx=10, fill="both", expand=True)
+        show_install_info()
 
 def update_game():
     global is_updating
@@ -206,7 +209,7 @@ def update_game():
         os.rmdir(install_dir)
     filenamevar.set("Installing new files...")
     progress_var.set(0)
-    install_from_zip(zip_path,read_from_ini("Game", "catania_path"))
+    threading.Thread(target=install_from_zip, args=(zip_path, read_from_ini("Game", "catania_path"))).start()
     ctk_components.CTkNotification(app, message="Game updated successfully.", side="right_top")
     is_updating = False
 
@@ -245,7 +248,7 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
     write_to_ini("Game", "catania_path", install_dir)
     write_to_ini("Game", "installed", "True")
     install_progress.pack_forget()
-    filename.pack_forget()
+    filename.pack.forget()
     update_buttons()
 
 def close_game():
@@ -355,22 +358,21 @@ def update_buttons():
     if installed:
         if not launch_button.winfo_viewable():
             launch_button.pack(pady=10, padx=10, side="right")
-        launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
+        launch_button.configure(text="Launch Catania", fg_color="green", hover_color="darkgreen", command=launch_game)
         select_folder_button.configure(state="normal")
         save_path_button.configure(state="normal")
         direntry.pack(pady=10, padx=5, side="left", fill="x", expand=True)
         GameOptions.pack(pady=10, padx=5, side="right")
         copy_button.pack(pady=10, padx=5, side="right")
-        requirements_label.pack_forget()
+        requirements_frame.pack_forget()
     else:
-        launch_button.configure(text="Install Catania",fg_color="#3B8ED0",hover_color="#36719F",command=install_game)
+        launch_button.configure(text="Install Catania", fg_color="#3B8ED0", hover_color="#36719F", command=install_game)
         save_path_button.configure(state="disabled")
         select_folder_button.configure(state="disabled")
         direntry.pack_forget()
         copy_button.pack_forget()
         GameOptions.pack_forget()
-        requirements_label.pack(pady=10, padx=10, side="top")
-        threading.Thread(target=check_system_requirements).start()
+        requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def copy_path():
     app.clipboard_clear()
@@ -394,6 +396,9 @@ def show_patch_notes(Version: str = "0.5"):
         The patch notes are expected to be stored in text files named with the version number (e.g., "0.5.txt") 
         in the directory specified by `versioninfo_dir`.
     """
+    launcher_info_frame.pack_forget()
+    consentframe.pack_forget()
+    requirements_frame.pack_forget()
     settings_frame.pack_forget()
     patch_notes_frame.pack(pady=10, padx=10, fill="both", expand=True)
     VersionTitle.configure(text=f"Patch Notes {Version}")
@@ -414,13 +419,7 @@ def show_patch_notes(Version: str = "0.5"):
                     justify="left"      # Linksbündige Textausrichtung
                 ).pack(pady=2, padx=5, side="top")
     except FileNotFoundError:
-        ctk.CTkLabel(
-            VersionInfo,
-            text="Patch notes file not found.",
-            wraplength=600,
-            anchor="w",
-            justify="left"
-        ).pack(pady=2, padx=5, side="top")
+        ctk.CTkLabel(VersionInfo,text="Patch notes file not found.",wraplength=600,anchor="w",justify="left").pack(pady=2, padx=5, side="top")
 
 def download_and_extract_github_repo(zip_url, extract_to):
     global progress_var
@@ -519,10 +518,51 @@ def on_closing():
     else:
         app.destroy()
 
+def show_main_screen():
+    global installed
+    """
+    Shows the main screen and hides other frames.
+    """
+    settings_frame.pack_forget()
+    onedrive_info_frame.pack_forget()
+    launcher_info_frame.pack_forget()
+    consentframe.pack_forget()
+    patch_notes_frame.pack_forget()
+    if not installed:
+        requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
+    else:
+        requirements_frame.pack_forget()
+
 def show_settings():
+    """
+    Shows the settings frame and hides other frames.
+    """
     patch_notes_frame.pack_forget()
     onedrive_info_frame.pack_forget()
+    launcher_info_frame.pack_forget()
+    requirements_frame.pack_forget()
     settings_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
+def show_launcher_info():
+    """
+    Shows the launcher info frame and hides other frames.
+    """
+    patch_notes_frame.pack_forget()
+    settings_frame.pack_forget()
+    onedrive_info_frame.pack_forget()
+    requirements_frame.pack_forget()
+    launcher_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
+def show_install_info():
+    """
+    Shows the install info
+    """
+    patch_notes_frame.pack_forget()
+    settings_frame.pack_forget()
+    onedrive_info_frame.pack_forget()
+    requirements_frame.pack_forget()
+    launcher_info_frame.pack_forget()
+    consentframe.pack(pady=10, padx=10, fill="both", expand=True)
 
 def move_game_files(new_path):
     old_path = read_from_ini("Game", "catania_path")
@@ -561,7 +601,7 @@ def move_game_files(new_path):
             CTkMessagebox(master=app, title="Error", message=f"Failed to move game files: {e}", option_1="OK", icon="warning")
         finally:
             install_progress.pack_forget()
-            filename.pack_forget()
+            filename.pack.forget()
             update_buttons()
     else:
         CTkMessagebox(master=app, title="Error", message="Old game path does not exist.", option_1="OK", icon="warning")
@@ -587,14 +627,6 @@ def toggle_restore_on_exit():
     current_value = read_from_ini("Settings", "restore_on_exit", "True")
     new_value = "False" if current_value == "True" else "True"
     write_to_ini("Settings", "restore_on_exit", new_value)
-
-def show_onedrive_info():
-    patch_notes_frame.pack_forget()
-    settings_frame.pack_forget()
-    onedrive_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
-
-def hide_onedrive_info():
-    onedrive_info_frame.pack_forget()
 
 def open_github_repo():
     webbrowser.open("https://github.com/Charmander12345/GameInstaller", new=2)
@@ -631,55 +663,6 @@ def get_GameVersions():
         if x.winfo_viewable:
             x.close_notification()
 
-def check_system_requirements():
-    # RAM-Mindestanforderungen
-    min_ram = 16 * 1024**3  # 16 GB in Bytes
-
-    # Vollständige Listen mit unterstützten Komponenten
-    supported_cpus = [
-        # AMD CPUs
-        "Ryzen 5 3600X", "Ryzen 5 5600", "Ryzen 5 5600X", "Ryzen 7 3700X", "Ryzen 7 3800X",
-        "Ryzen 7 5700X", "Ryzen 9 3900X", "Ryzen 9 3950X", "Ryzen 9 5900X", "Ryzen 9 5950X",
-        "Ryzen 5 7600", "Ryzen 7 7700X", "Ryzen 9 7900X",
-        # Intel CPUs
-        "Core i5-10600K", "Core i5-11600K", "Core i5-12600K", "Core i7-10700K", "Core i7-11700K",
-        "Core i7-12700K", "Core i7-13700K", "Core i9-10850K", "Core i9-10900K", "Core i9-11900K",
-        "Core i9-12900K", "Core i9-13900K", "Core i5-13600K", "Core i7-14700K", "Core i9-14900K"
-    ]
-    
-    supported_gpus = [
-        # NVIDIA GPUs
-        "RTX 3060", "RTX 3060 Ti", "RTX 3070", "RTX 3070 Ti", "RTX 3080", "RTX 3080 Ti", "RTX 3090",
-        "RTX 3090 Ti", "RTX 4060", "RTX 4060 Ti", "RTX 4070", "RTX 4070 Ti", "RTX 4080", "RTX 4090",
-        # AMD GPUs
-        "RX 6600", "RX 6600 XT", "RX 6650 XT", "RX 6700 XT", "RX 6750 XT", "RX 6800", "RX 6800 XT",
-        "RX 6900 XT", "RX 6950 XT", "RX 7600", "RX 7700 XT", "RX 7800 XT", "RX 7900 XT", "RX 7900 XTX",
-        # Intel GPUs
-        "Arc A750", "Arc A770"
-    ]
-
-    # RAM überprüfen
-    ram = psutil.virtual_memory().total
-    if ram < min_ram:
-        requirements_label.configure(text=f"Your system does not meet the minimum RAM requirements. Required: 16 GB, Found: {ram / 1024**3:.2f} GB.")
-        return
-
-    # CPU überprüfen
-    cpu_info = get_cpu_info()
-    cpu_name = cpu_info['brand_raw']
-    if not any(cpu in cpu_name for cpu in supported_cpus):
-        requirements_label.configure(text=f"Your CPU does not meet the minimum requirements. You may experience performance issues.")
-        return
-
-    # GPU überprüfen
-    gpus = GPUtil.getGPUs()
-    if not any(any(gpu in gpu_info.name for gpu in supported_gpus) for gpu_info in gpus):
-        requirements_label.configure(text="Your GPU does not meet the minimum requirements. You may experience performance issues.")
-        return
-
-    requirements_label.configure(text="Your system meets the minimum requirements.")
-    return
-
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
 PNButton = menu.add_cascade("Patch Notes")
@@ -688,7 +671,7 @@ AboutButton = menu.add_cascade("About")
 
 # Patch Notes
 patch_notes_frame = ctk.CTkFrame(app)
-back_button = ctk.CTkButton(patch_notes_frame, text="Back", command=lambda: patch_notes_frame.pack_forget())
+back_button = ctk.CTkButton(patch_notes_frame, text="Back", command=show_main_screen)
 back_button.pack(pady=5, padx=5, side="bottom")
 VersionTitle = ctk.CTkLabel(patch_notes_frame, text=f"Patch Notes", font=("Arial", 20))
 VersionTitle.pack(pady=5, padx=5, side="top")
@@ -699,7 +682,7 @@ VersionInfo.pack(pady=5, padx=10, fill="both", expand=True)
 settings_frame = ctk.CTkFrame(app)
 settings_label = ctk.CTkLabel(settings_frame, text="Launcher Settings", font=("Arial", 20))
 settings_label.pack(pady=10, padx=10, side="top")
-settings_back_button = ctk.CTkButton(settings_frame, text="Back", command=lambda: settings_frame.pack_forget())
+settings_back_button = ctk.CTkButton(settings_frame, text="Back", command=show_main_screen)
 settings_back_button.pack(pady=10, padx=10, side="bottom")
 
 # Scrollable Frame for Settings
@@ -756,24 +739,20 @@ onedrive_info_text.pack(pady=10, padx=10, side="top")
 github_button = ctk.CTkButton(onedrive_info_frame, text="GitHub Repository", command=open_github_repo)
 github_button.pack(pady=10, padx=10, side="top")
 onedrive_info_text.pack(pady=10, padx=10, side="top")
-onedrive_info_back_button = ctk.CTkButton(onedrive_info_frame, text="Back", command=hide_onedrive_info)
+onedrive_info_back_button = ctk.CTkButton(onedrive_info_frame, text="Back", command=show_main_screen)
 onedrive_info_back_button.pack(pady=10, padx=10, side="bottom")
 
-# About Dropdown
-AboutDropdown = CustomDropdownMenu(widget=AboutButton)
-AboutDropdown.add_option(option="About the game")
-AboutDropdown.add_separator()
-launcher_submenu = AboutDropdown.add_submenu(submenu_name="About the launcher")
-launcher_submenu.add_option(option="Info", command=lambda: CTkMessagebox(master=app, title="Launcher Version", message="Version 1.0.0", option_1="OK", icon="info"))
-launcher_submenu.add_separator()
-launcher_submenu.add_option(option="Author", command=lambda: CTkMessagebox(master=app, title="Author", message="Developed by Horizon Creations", option_1="OK", icon="info"))
-launcher_submenu.add_separator()
+# Launcher Info Frame
+launcher_info_frame = ctk.CTkFrame(app)
+launcher_info_title = ctk.CTkLabel(launcher_info_frame, text="Launcher Information", font=("Arial", 20))
+launcher_info_title.pack(pady=10, padx=10, side="top")
+launcher_info_text = ctk.CTkLabel(launcher_info_frame, text="This launcher is developed by Horizon Creations to manage the installation, updating, and uninstallation of the Catania game. For more information, visit our GitHub repository:", wraplength=500, justify="center")
+launcher_info_text.pack(pady=10, padx=10, side="top")
 
-# Data & Safety Submenu
-data_safety_submenu = launcher_submenu.add_submenu(submenu_name="Data & Safety")
-data_safety_submenu.add_option(option="OneDrive", command=show_onedrive_info)
-data_safety_submenu.add_separator()
-data_safety_submenu.add_option(option="License", command=lambda: CTkMessagebox(master=app, title="License", message="MIT License", option_1="OK", icon="info"))
+github_button_launcher_info = ctk.CTkButton(launcher_info_frame, text="GitHub Repository", command=open_github_repo)
+github_button_launcher_info.pack(pady=10, padx=10, side="top")
+launcher_info_back_button = ctk.CTkButton(launcher_info_frame, text="Back", command=show_main_screen)
+launcher_info_back_button.pack(pady=10, padx=10, side="bottom")
 
 # Consent
 consentframe = ctk.CTkFrame(app)
@@ -783,7 +762,7 @@ consentbutton = ctk.CTkButton(consentframe,text="Launcher download",command=lamb
 consentbutton.pack(pady=10, padx=10, side="bottom")
 manualbutton = ctk.CTkButton(consentframe,text="Install manually",command=lambda: install_game("manual"))
 manualbutton.pack(pady=10, padx=10, side="bottom")
-nothingbutton = ctk.CTkButton(consentframe,text="Go back",command=consentframe.pack_forget)
+nothingbutton = ctk.CTkButton(consentframe,text="Go back",command=show_main_screen)
 nothingbutton.pack(pady=10, padx=10, side="bottom")
 
 # Launch Frame
@@ -815,6 +794,34 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 copy_icon_path = os.path.join(base_dir, "icons/copy/Light.png")
 copy_icon = ctk.CTkImage(Image.open(copy_icon_path))
 copy_button = ctk.CTkButton(launchframe, image=copy_icon, text="", command=lambda: os.startfile(game_path_var.get()), width=30, height=30, fg_color="darkgray", hover_color="gray")
+
+# Minimum Requirements Frame
+requirements_frame = ctk.CTkFrame(app)
+requirements_label = ctk.CTkLabel(requirements_frame, text="Minimum System Requirements", font=("Arial", 20))
+requirements_label.pack(pady=10, padx=10, side="top")
+
+requirements_text = """
+- OS: Windows 10 or higher
+- Processor: AMD Ryzen 5 3600X / Intel Core i5-10600K or better
+- Memory: 16 GB RAM
+- Graphics: NVIDIA RTX 3060 / AMD RX 6600 or better
+- DirectX: Version 12
+- Storage: 5 GB available space
+
+Even tho you can technically still install and run the game we would not recommend it with a configuration below the minimum requirements.
+"""
+requirements_details = ctk.CTkLabel(requirements_frame, text=requirements_text, justify="left", anchor="w")
+requirements_details.pack(pady=10, padx=10, side="top")
+
+# About Dropdown
+AboutDropdown = CustomDropdownMenu(widget=AboutButton)
+AboutDropdown.add_option(option="About the game")
+AboutDropdown.add_separator()
+launcher_submenu = AboutDropdown.add_submenu(submenu_name="About the launcher")
+launcher_submenu.add_option(option="Info", command=show_launcher_info)
+launcher_submenu.add_separator()
+launcher_submenu.add_option(option="Author", command=lambda: CTkMessagebox(master=app, title="Author", message="Developed by Horizon Creations", option_1="OK", icon="info"))
+launcher_submenu.add_separator()
 
 app.protocol("WM_DELETE_WINDOW", on_closing)
 app.after(100, update_buttons)
