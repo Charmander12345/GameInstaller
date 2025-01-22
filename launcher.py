@@ -248,7 +248,7 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
     write_to_ini("Game", "catania_path", install_dir)
     write_to_ini("Game", "installed", "True")
     install_progress.pack_forget()
-    filename.pack.forget()
+    filename.pack_forget()
     update_buttons()
 
 def close_game():
@@ -365,7 +365,10 @@ def update_buttons():
         GameOptions.pack(pady=10, padx=5, side="right")
         copy_button.pack(pady=10, padx=5, side="right")
         requirements_frame.pack_forget()
+        game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
     else:
+        if not launch_button.winfo_viewable():
+            launch_button.pack(pady=10, padx=10, side="right")
         launch_button.configure(text="Install Catania", fg_color="#3B8ED0", hover_color="#36719F", command=install_game)
         save_path_button.configure(state="disabled")
         select_folder_button.configure(state="disabled")
@@ -373,6 +376,7 @@ def update_buttons():
         copy_button.pack_forget()
         GameOptions.pack_forget()
         requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
+        game_info_frame.pack_forget()
 
 def copy_path():
     app.clipboard_clear()
@@ -497,12 +501,26 @@ def uninstall_game():
         return
     install_dir = read_from_ini("Game", "catania_path")
     if os.path.exists(install_dir):
+        total_files = sum([len(files) for r, d, files in os.walk(install_dir)])
+        count = 0
+        launch_button.pack_forget()
+        GameOptions.pack_forget()
+        copy_button.pack_forget()
+        direntry.pack_forget()
+        filename.pack(pady=5, padx=5, side="top")
+        install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
+        filenamevar.set("Uninstalling files...")
         for root, dirs, files in os.walk(install_dir, topdown=False):
             for name in files:
                 os.remove(os.path.join(root, name))
+                count += 1
+                progress_var.set(count / total_files)
+                app.update_idletasks()
             for name in dirs:
                 os.rmdir(os.path.join(root, name))
         os.rmdir(install_dir)
+        filename.pack_forget()
+        install_progress.pack_forget()
     write_to_ini("Game", "catania_path", "")
     write_to_ini("Game", "installed", "False")
     update_buttons()
@@ -518,8 +536,25 @@ def on_closing():
     else:
         app.destroy()
 
+def get_game_info():
+    """
+    Retrieves information about the installed game, such as its size.
+    Returns:
+        dict: A dictionary containing game information.
+    """
+    game_info = {}
+    game_path = read_from_ini("Game", "catania_path")
+    if os.path.exists(game_path):
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(game_path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                total_size += os.path.getsize(fp)
+        game_info['size'] = total_size
+        game_info['path'] = game_path
+    return game_info
+
 def show_main_screen():
-    global installed
     """
     Shows the main screen and hides other frames.
     """
@@ -531,7 +566,11 @@ def show_main_screen():
     if not installed:
         requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
     else:
+        print("Installed")
         requirements_frame.pack_forget()
+        game_info = get_game_info()
+        game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
+        game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def show_settings():
     """
@@ -541,6 +580,7 @@ def show_settings():
     onedrive_info_frame.pack_forget()
     launcher_info_frame.pack_forget()
     requirements_frame.pack_forget()
+    game_info_frame.pack_forget()
     settings_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def show_launcher_info():
@@ -551,6 +591,7 @@ def show_launcher_info():
     settings_frame.pack_forget()
     onedrive_info_frame.pack_forget()
     requirements_frame.pack_forget()
+    game_info_frame.pack_forget()
     launcher_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def show_install_info():
@@ -562,6 +603,7 @@ def show_install_info():
     onedrive_info_frame.pack_forget()
     requirements_frame.pack_forget()
     launcher_info_frame.pack_forget()
+    game_info_frame.pack_forget()
     consentframe.pack(pady=10, padx=10, fill="both", expand=True)
 
 def move_game_files(new_path):
@@ -756,7 +798,7 @@ launcher_info_back_button.pack(pady=10, padx=10, side="bottom")
 
 # Consent
 consentframe = ctk.CTkFrame(app)
-consenttext = ctk.CTkLabel(consentframe,text="The Launcher can download the game from a dedicated server. If you already habe a downloaded zip file from the OneDrive folder you can use the Launcher to install that.",wraplength=500,justify="center")
+consenttext = ctk.CTkLabel(consentframe,text="The Launcher can download the game from a dedicated server. If you already have a downloaded zip file from the OneDrive folder you can use the Launcher to install that.",wraplength=500,justify="center")
 consenttext.pack(pady=10, padx=10, side="top")
 consentbutton = ctk.CTkButton(consentframe,text="Launcher download",command=lambda: threading.Thread(target=install_game("consent")).start())
 consentbutton.pack(pady=10, padx=10, side="bottom")
@@ -784,7 +826,7 @@ requirements_label = ctk.CTkLabel(launchframe, text="Checking system requirement
 # Popup Menu
 popup_menu = tk.Menu(app, tearoff=0)
 popup_menu.add_command(label="Update", command=lambda: threading.Thread(target=update_game).start())
-popup_menu.add_command(label="Uninstall", command=uninstall_game)
+popup_menu.add_command(label="Uninstall", command= lambda: threading.Thread(target=uninstall_game).start())
 
 # Game path entry
 direntry = ctk.CTkEntry(launchframe, textvariable=game_path_var, state="readonly")
@@ -806,12 +848,23 @@ requirements_text = """
 - Memory: 16 GB RAM
 - Graphics: NVIDIA RTX 3060 / AMD RX 6600 or better
 - DirectX: Version 12
-- Storage: 5 GB available space
+- Storage: 8 GB available space
 
 Even tho you can technically still install and run the game we would not recommend it with a configuration below the minimum requirements.
 """
 requirements_details = ctk.CTkLabel(requirements_frame, text=requirements_text, justify="left", anchor="w")
 requirements_details.pack(pady=10, padx=10, side="top")
+
+# Game Info Frame
+game_info_frame = ctk.CTkFrame(app)
+game_info_label = ctk.CTkLabel(game_info_frame, text="Game Information", font=("Arial", 20))
+game_info_label.pack(pady=10, padx=10, side="top")
+
+game_info_text = ctk.StringVar()
+game_info = get_game_info()
+game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
+game_info_details = ctk.CTkLabel(game_info_frame, textvariable=game_info_text, justify="left", anchor="w")
+game_info_details.pack(pady=10, padx=10, side="top")
 
 # About Dropdown
 AboutDropdown = CustomDropdownMenu(widget=AboutButton)
@@ -821,7 +874,6 @@ launcher_submenu = AboutDropdown.add_submenu(submenu_name="About the launcher")
 launcher_submenu.add_option(option="Info", command=show_launcher_info)
 launcher_submenu.add_separator()
 launcher_submenu.add_option(option="Author", command=lambda: CTkMessagebox(master=app, title="Author", message="Developed by Horizon Creations", option_1="OK", icon="info"))
-launcher_submenu.add_separator()
 
 app.protocol("WM_DELETE_WINDOW", on_closing)
 app.after(100, update_buttons)
