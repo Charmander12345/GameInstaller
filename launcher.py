@@ -66,6 +66,9 @@ extract_to = "VersionInfo"
 progress_var = ctk.DoubleVar()
 game_path_var = ctk.StringVar(value=game_path)
 
+# Global variable to store verification status
+is_verified = False
+
 def write_to_ini(section, key, value):
     if section not in config:
         config[section] = {}
@@ -129,7 +132,7 @@ def launch_game():
         game_path = read_from_ini("Game", "catania_path")
         game_executable = os.path.join(game_path, "Catania.exe")
         if os.path.exists(game_executable):
-            game_process = subprocess.Popen(game_executable)
+            game_process = subprocess.Popen([game_executable,"-fromlauncher"])
             is_running = True
             update_button_text()
             show_main_screen()
@@ -228,6 +231,8 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
         OSError: If there is an error creating the installation directory.
         zipfile.BadZipFile: If the ZIP file is corrupt or not a ZIP file.
     """
+    global is_updating
+    is_updating = True
     filename.pack(pady=5, padx=5, side="top")
     install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
     filenamevar.set("Extracting files...")
@@ -251,6 +256,7 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
     install_progress.pack_forget()
     filename.pack_forget()
     update_buttons()
+    is_updating = False
 
 def close_game():
     """
@@ -335,39 +341,29 @@ def update_button_text():
         launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
         show_main_screen()
 
-def update_buttons():
+def update_buttons(menu:str = ""):
     """
-    Updates the state and visibility of various buttons in the game installer UI based on whether the game is installed.
-
-    This function checks if the game is installed by calling `checkGamePath()`. Depending on the result, it updates the 
-    text, colors, and commands of the `launch_button`, and manages the visibility of `direntry`, `GameOptions`, and 
-    `copy_button`.
-
-    If the game is installed:
-        - Displays the `launch_button` with text "Launch Catania" and green colors.
-        - Packs `direntry`, `GameOptions`, and `copy_button` with specified padding and alignment.
-
-    If the game is not installed:
-        - Configures the `launch_button` with text "Install Catania" and blue colors.
-        - Hides `direntry`, `GameOptions`, and `copy_button`.
-
-    Globals:
-        installed (bool): Indicates whether the game is installed.
-
+    Updates the state and visibility of various buttons in the game installer UI based on whether the game is installed and verified.
     """
-    global installed
+    global installed, is_verified
     installed = checkGamePath()
+    is_verified = read_from_ini("Tester", "verified", "False") == "True"
     if installed:
         if not launch_button.winfo_viewable():
             launch_button.pack(pady=10, padx=10, side="right")
-        launch_button.configure(text="Launch Catania", fg_color="green", hover_color="darkgreen", command=launch_game)
+        if is_verified:
+            verification_frame.pack_forget()
+            launch_button.configure(text="Launch Catania", fg_color="green", hover_color="darkgreen", command=launch_game)
+        else:
+            launch_button.configure(text="Verify Key", fg_color="orange", hover_color="darkorange", command=show_verification_screen)
         select_folder_button.configure(state="normal")
         save_path_button.configure(state="normal")
         direntry.pack(pady=10, padx=5, side="left", fill="x", expand=True)
         GameOptions.pack(pady=10, padx=5, side="right")
         copy_button.pack(pady=10, padx=5, side="right")
-        requirements_frame.pack_forget()
-        game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
+        if not menu == "settings":
+            requirements_frame.pack_forget()
+            game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
     else:
         if not launch_button.winfo_viewable():
             launch_button.pack(pady=10, padx=10, side="right")
@@ -377,8 +373,9 @@ def update_buttons():
         direntry.pack_forget()
         copy_button.pack_forget()
         GameOptions.pack_forget()
-        requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
-        game_info_frame.pack_forget()
+        if not menu == "settings":
+            game_info_frame.pack_forget()
+            requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def copy_path():
     app.clipboard_clear()
@@ -406,6 +403,8 @@ def show_patch_notes(Version: str = "0.5"):
     consentframe.pack_forget()
     requirements_frame.pack_forget()
     settings_frame.pack_forget()
+    game_info_frame.pack_forget()
+    usage_info_frame.pack_forget()
     patch_notes_frame.pack(pady=10, padx=10, fill="both", expand=True)
     VersionTitle.configure(text=f"Patch Notes {Version}")
 
@@ -430,9 +429,11 @@ def show_patch_notes(Version: str = "0.5"):
 def download_and_extract_github_repo(zip_url, extract_to):
     global progress_var
     global update_progress_popup
+    global is_updating
     # ZIP-Datei herunterladen
     response = requests.get(zip_url)
     if response.status_code == 200:
+        is_updating = True
         progress_var.set(.5)
         with io.BytesIO(response.content) as zip_file:
             progress_var.set(1)
@@ -470,6 +471,7 @@ def download_and_extract_github_repo(zip_url, extract_to):
 
         # Ursprünglichen Ordner löschen
         shutil.rmtree(os.path.join(versioninfo_dir, "GameInstaller-main"))
+        is_updating = False
     else:
         CTkMessagebox(master=app, title="Error", message="Failed to download version info.", option_1="OK", icon="warning")
 
@@ -499,8 +501,10 @@ def UpdatePND():
                 PNDropdown.add_separator()
 
 def uninstall_game():
+    global is_updating
     if not messagebox.askyesno("Confirm Uninstall", "Are you sure you want to uninstall Catania?"):
         return
+    is_updating = True
     install_dir = read_from_ini("Game", "catania_path")
     if os.path.exists(install_dir):
         total_files = sum([len(files) for r, d, files in os.walk(install_dir)])
@@ -526,15 +530,18 @@ def uninstall_game():
     write_to_ini("Game", "catania_path", "")
     write_to_ini("Game", "installed", "False")
     update_buttons()
+    is_updating = False
 
 def show_popup_menu(event):
     popup_menu.tk_popup(event.x_root, event.y_root)
 
 def on_closing():
+    global is_running
+    global is_updating
     if is_running:
         CTkMessagebox(master=app, title="Game Running", message="Please close the game before exiting the launcher.", option_1="OK", icon="warning")
     elif is_updating:
-        CTkMessagebox(master=app, title="Update in Progress", message="Please wait for the update to complete before exiting the launcher.", option_1="OK", icon="warning")
+        CTkMessagebox(master=app, title="Operation in progess", message="Please wait for the launcher to finish the current operation.", option_1="OK", icon="warning")
     else:
         app.destroy()
 
@@ -565,19 +572,17 @@ def show_main_screen():
     launcher_info_frame.pack_forget()
     consentframe.pack_forget()
     patch_notes_frame.pack_forget()
+    verification_frame.pack_forget()
     if not installed:
         requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
     else:
         requirements_frame.pack_forget()
-        game_info = get_game_info()
-        game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
-        game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
-        if is_running:
-            game_info_frame.pack_forget()
-            usage_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
-            update_usage_info()
+        if not is_running and not is_verified:
+            verification_frame.pack(pady=10, padx=10, fill="both", expand=True)
         else:
-            usage_info_frame.pack_forget()
+            game_info = get_game_info()
+            game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
+            game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def show_settings():
     """
@@ -617,9 +622,11 @@ def show_install_info():
     consentframe.pack(pady=10, padx=10, fill="both", expand=True)
 
 def move_game_files(new_path):
+    global is_updating
     old_path = read_from_ini("Game", "catania_path")
     new_game_path = os.path.join(new_path, "CataniaGame")
     if os.path.exists(old_path): 
+        is_updating = True
         try:
             # Hide all elements in the launch frame
             for widget in launchframe.winfo_children():
@@ -654,7 +661,8 @@ def move_game_files(new_path):
         finally:
             install_progress.pack_forget()
             filename.pack_forget()
-            update_buttons()
+            update_buttons(menu = "settings")
+            is_updating = False
     else:
         CTkMessagebox(master=app, title="Error", message="Old game path does not exist.", option_1="OK", icon="warning")
 
@@ -714,19 +722,52 @@ def get_GameVersions():
         time.sleep(2)
         if x.winfo_viewable:
             x.close_notification()
+    finally:
+        ftp.quit()
 
-def update_usage_info():
-    """
-    Updates the usage information for GPU, CPU, and RAM.
-    """
-    if is_running:
-        cpu_usage = psutil.cpu_percent()
-        ram_usage = psutil.virtual_memory().percent
-        gpus = GPUtil.getGPUs()
-        gpu_usage = gpus[0].load * 100 if gpus else 0
+def checkKey(key:str):
+    if not os.path.exists("keys.txt"):
+        with open("keys.txt","w") as file:
+            file.write("")
+        return False
+    keys = []
+    with open("keys.txt","r") as file:
+        for line in file:
+            keys.append(line.strip())
+    if key in keys:
+        return True
 
-        usage_info_text.set(f"CPU Usage: {cpu_usage}%\nRAM Usage: {ram_usage}%\nGPU Usage: {gpu_usage}%")
-        app.after(1000, update_usage_info)  # Update every second
+def verify_key():
+    """
+    Verifies the tester key entered by the user.
+    """
+    global is_verified
+    key = key_entry.get()
+    if checkKey(key):
+        is_verified = True
+        write_to_ini("Tester", "verified", "True")
+        update_buttons()
+        CTkMessagebox(master=app, title="Success", message="Key verified successfully.", option_1="OK", icon="info")
+    else:
+        CTkMessagebox(master=app, title="Invalid Key", message="The entered key is invalid.", option_1="OK", icon="warning")
+
+def show_verification_screen():
+    """
+    Shows the key verification screen.
+    """
+    verification_frame.pack(pady=10, padx=10, fill="both", expand=True)
+    game_info_frame.pack_forget()
+    requirements_frame.pack_forget()
+
+def unverify():
+    """
+    Unverifies the tester key.
+    """
+    global is_verified
+    is_verified = False
+    write_to_ini("Tester", "verified", "False")
+    update_buttons()
+    #CTkMessagebox(master=app, title="Success", message="Key unverified successfully.", option_1="OK", icon="info")
 
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
@@ -848,6 +889,7 @@ requirements_label = ctk.CTkLabel(launchframe, text="Checking system requirement
 
 # Popup Menu
 popup_menu = tk.Menu(app, tearoff=0)
+popup_menu.add_command(label="Change Tester Key", command=unverify)
 popup_menu.add_command(label="Update", command=lambda: threading.Thread(target=update_game).start())
 popup_menu.add_command(label="Uninstall", command= lambda: threading.Thread(target=uninstall_game).start())
 
@@ -897,6 +939,17 @@ usage_info_label.pack(pady=10, padx=10, side="top")
 usage_info_text = tk.StringVar()
 usage_info_details = ctk.CTkLabel(usage_info_frame, textvariable=usage_info_text, justify="left", anchor="w")
 usage_info_details.pack(pady=10, padx=10, side="top")
+
+# Verification Frame
+verification_frame = ctk.CTkFrame(app)
+verification_label = ctk.CTkLabel(verification_frame, text="Enter Tester Key", font=("Arial", 20))
+verification_label.pack(pady=10, padx=10, side="top")
+key_entry = ctk.CTkEntry(verification_frame)
+key_entry.pack(pady=10, padx=10, side="top")
+verify_button = ctk.CTkButton(verification_frame, text="Verify", command=verify_key)
+verify_button.pack(pady=10, padx=10, side="top")
+verification_back_button = ctk.CTkButton(verification_frame, text="Back", command=show_main_screen)
+verification_back_button.pack(pady=10, padx=10, side="bottom")
 
 # About Dropdown
 AboutDropdown = CustomDropdownMenu(widget=AboutButton)
