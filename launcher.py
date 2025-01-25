@@ -137,12 +137,6 @@ def hide_record_info():
     record_info_frame.place_forget()
     launch_game()
 
-def open_info_page():
-    """
-    Opens the info page in the default web browser.
-    """
-    webbrowser.open("https://github.com/Charmander12345/GameInstaller#privacy", new=2)
-
 def launch_game():
     """
     Launches the Catania game if the executable is found.
@@ -391,7 +385,7 @@ def update_buttons(menu:str = ""):
     if installed:
         if not launch_button.winfo_viewable():
             launch_button.pack(pady=10, padx=10, side="right")
-        if is_verified:
+        if True:
             verification_frame.pack_forget()
             launch_button.configure(text="Launch Catania", state="normal", fg_color="green", hover_color="darkgreen", command=show_record_info)
         else:
@@ -906,6 +900,7 @@ def show_reports_info():
     """
     Shows the reports info frame and hides other frames.
     """
+    record_info_frame.place_forget()
     patch_notes_frame.pack_forget()
     settings_frame.pack_forget()
     onedrive_info_frame.pack_forget()
@@ -913,6 +908,7 @@ def show_reports_info():
     game_info_frame.pack_forget()
     usage_info_frame.pack_forget()
     launcher_info_frame.pack_forget()
+    update_button_text()
     reports_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 # Widgets
@@ -1040,7 +1036,7 @@ requirements_label = ctk.CTkLabel(launchframe, text="Checking system requirement
 
 # Popup Menu
 popup_menu = tk.Menu(app, tearoff=0)
-popup_menu.add_command(label="Change Tester Key", command=unverify)
+#popup_menu.add_command(label="Change Tester Key", command=unverify)
 popup_menu.add_command(label="Update", command=lambda: threading.Thread(target=update_game).start())
 popup_menu.add_command(label="Uninstall", command= lambda: threading.Thread(target=uninstall_game).start())
 
@@ -1128,7 +1124,7 @@ launcher_submenu.add_option(option="Author", command=lambda: CTkMessagebox(maste
 record_info_frame = ctk.CTkFrame(app, fg_color="#2b2b2b")  # Darker gray color
 record_info_label = ctk.CTkLabel(record_info_frame, text="The launcher creates anonymized reports by default. Do you want to continue?", wraplength=500, justify="center")
 record_info_label.pack(pady=10, padx=10, side="top")
-info_button = ctk.CTkButton(record_info_frame, text="More Info", command=open_info_page)
+info_button = ctk.CTkButton(record_info_frame, text="More Info", command=show_reports_info)
 info_button.pack(pady=10, padx=10, side="left")
 continue_button = ctk.CTkButton(record_info_frame, text="Continue", command=hide_record_info)
 continue_button.pack(pady=10, padx=10, side="right")
