@@ -25,6 +25,8 @@ import socket
 from cpuinfo import get_cpu_info
 import psutil
 import GPUtil
+import platform
+import csv
 
 ctk.set_appearance_mode("dark")
 
@@ -36,6 +38,10 @@ versioninfo_dir = os.path.join(appdata_dir, 'VersionInfo')
 # Ensure the directories exist
 os.makedirs(appdata_dir, exist_ok=True)
 os.makedirs(versioninfo_dir, exist_ok=True)
+
+# Define path for reports
+reports_dir = os.path.join(appdata_dir, 'Reports')
+os.makedirs(reports_dir, exist_ok=True)
 
 config = ConfigParser()
 config.read(config_path)
@@ -62,6 +68,7 @@ is_updating = False
 installed = False
 repo_url = "https://github.com/Charmander12345/GameInstaller/archive/refs/heads/main.zip"
 extract_to = "VersionInfo"
+report = {}
 
 progress_var = ctk.DoubleVar()
 game_path_var = ctk.StringVar(value=game_path)
@@ -85,6 +92,9 @@ def read_from_ini(section, key, default_value=""):
             config.write(configfile)
     return config[section][key]
 
+# Global variable to store report recording status
+record_reports = read_from_ini("Settings", "record_reports", "False") == "True"
+
 def checkGamePath():
     """
     Checks and sets the game installation path.
@@ -107,6 +117,31 @@ def checkGamePath():
         write_to_ini("Game", "catania_path", game_path)
         write_to_ini("Game", "installed", "True")
         return True
+
+def show_record_info():
+    """
+    Shows the record info banner if the setting is enabled or not present in the INI file.
+    """
+    if read_from_ini("Settings", "showrecordinfo", "True") == "True":
+        record_info_frame.place(relx=0.5, rely=0.5, anchor="center", relwidth=1, relheight=0.2)
+        launch_button.configure(state="disabled", text="Waiting...")
+    else:
+        launch_game()
+
+def hide_record_info():
+    """
+    Hides the record info banner and launches the game.
+    """
+    if dont_show_again_var.get() == "True":
+        write_to_ini("Settings", "showrecordinfo", "False")
+    record_info_frame.place_forget()
+    launch_game()
+
+def open_info_page():
+    """
+    Opens the info page in the default web browser.
+    """
+    webbrowser.open("https://github.com/Charmander12345/GameInstaller#privacy", new=2)
 
 def launch_game():
     """
@@ -132,10 +167,13 @@ def launch_game():
         game_path = read_from_ini("Game", "catania_path")
         game_executable = os.path.join(game_path, "Catania.exe")
         if os.path.exists(game_executable):
-            game_process = subprocess.Popen([game_executable,"-fromlauncher"])
+            creationflags = subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS
+            game_process = subprocess.Popen([game_executable,"-fromlauncher"],creationflags= subprocess.DETACHED_PROCESS)
             is_running = True
             update_button_text()
             show_main_screen()
+            if record_reports:
+                threading.Thread(target=record_stats,).start()
             if read_from_ini("Settings", "minimize_on_start", "True") == "True":
                 time.sleep(1)  # Wait for the game to start
                 app.iconify()  # Minimize the launcher window
@@ -148,6 +186,8 @@ def launch_game():
                 game_process = subprocess.Popen(game_executable)
                 is_running = True
                 update_button_text()
+                if record_reports:
+                    threading.Thread(target=record_stats).start()
                 if read_from_ini("Settings", "minimize_on_start", "True") == "True":
                     time.sleep(1)  # Wait for the game to start
                     app.iconify()  # Minimize the launcher window
@@ -327,18 +367,18 @@ def update_button_text():
     global is_running
     if is_running:
         if game_process and game_process.poll() is None:  # Process is running
-            launch_button.configure(text="Close Game", fg_color="red",hover_color="darkred", command=lambda: threading.Thread(target=close_game).start())
+            launch_button.configure(text="Close Game", state="normal", fg_color="red",hover_color="darkred", command=lambda: threading.Thread(target=close_game).start())
         else:
             if read_from_ini("Settings", "restore_on_exit", "True") == "True":
                 app.deiconify()  # Restore the launcher window
                 app.lift()  # Bring the launcher window to the front
                 app.focus_force()  # Focus the launcher window
-            launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
+            launch_button.configure(text="Launch Catania",state="normal", fg_color="green",hover_color="darkgreen",command=launch_game)
             game_process = None
             is_running = False
         app.after(1000, update_button_text)  # Check every second
     else:
-        launch_button.configure(text="Launch Catania",fg_color="green",hover_color="darkgreen",command=launch_game)
+        launch_button.configure(text="Launch Catania",state="normal", fg_color="green",hover_color="darkgreen",command=launch_game)
         show_main_screen()
 
 def update_buttons(menu:str = ""):
@@ -353,9 +393,9 @@ def update_buttons(menu:str = ""):
             launch_button.pack(pady=10, padx=10, side="right")
         if is_verified:
             verification_frame.pack_forget()
-            launch_button.configure(text="Launch Catania", fg_color="green", hover_color="darkgreen", command=launch_game)
+            launch_button.configure(text="Launch Catania", state="normal", fg_color="green", hover_color="darkgreen", command=show_record_info)
         else:
-            launch_button.configure(text="Verify Key", fg_color="orange", hover_color="darkorange", command=show_verification_screen)
+            launch_button.configure(text="Verify Key", state="normal", fg_color="orange", hover_color="darkorange", command=show_verification_screen)
         select_folder_button.configure(state="normal")
         save_path_button.configure(state="normal")
         direntry.pack(pady=10, padx=5, side="left", fill="x", expand=True)
@@ -573,6 +613,7 @@ def show_main_screen():
     consentframe.pack_forget()
     patch_notes_frame.pack_forget()
     verification_frame.pack_forget()
+    reports_info_frame.pack_forget()
     if not installed:
         requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
     else:
@@ -688,6 +729,11 @@ def toggle_restore_on_exit():
     new_value = "False" if current_value == "True" else "True"
     write_to_ini("Settings", "restore_on_exit", new_value)
 
+def toggle_record_reports():
+    global record_reports
+    record_reports = not record_reports
+    write_to_ini("Settings", "record_reports", "True" if record_reports else "False")
+
 def open_github_repo():
     webbrowser.open("https://github.com/Charmander12345/GameInstaller", new=2)
 
@@ -769,6 +815,106 @@ def unverify():
     update_buttons()
     #CTkMessagebox(master=app, title="Success", message="Key unverified successfully.", option_1="OK", icon="info")
 
+def save_report():
+    """
+    Saves the system report to a CSV file in the reports directory.
+    """
+    filename = os.path.join(reports_dir, f"report_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+    with open(filename, "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["System Report"])
+        writer.writerow(["Generated on:", time.strftime("%Y-%m-%d %H:%M:%S")])
+        writer.writerow(["OS:", report["OS"]])
+        writer.writerow(["OS Version:", report["OSVER"]])
+        writer.writerow(["CPU:", report["CPUNAME"]])
+        writer.writerow(["CPU Cores:", report["CORES"]])
+        writer.writerow(["CPU Threads:", report["THREADS"]])
+        writer.writerow(["CPU Frequency (MHz):", report["CPUFREQ"]])
+        writer.writerow(["GPU:", report["GPUNAME"]])
+        writer.writerow(["GPU VRAM (MB):", report["GPUMEM"]])
+        writer.writerow([])
+        writer.writerow(["CPU Usage (%)", "CPU Frequency (MHz)", "RAM Usage (MB)", "GPU Usage (%)", "GPU VRAM Usage (MB)"])
+        for entry in report["REPORT"]:
+            writer.writerow(entry)
+    ctk_components.CTkNotification(master=app,state="info", message="The system report has been saved successfully.", side="right_top")
+
+def record_stats():
+    global report
+    global is_running
+    while is_running:
+        if "RAM" not in report or not report["RAM"]:
+            report["RAM"] = psutil.virtual_memory().total
+        if "CPUNAME" not in report or not report["CPUNAME"]:
+            report["CPUNAME"] = platform.processor()
+        if "CPUFREQ" not in report or not report["CPUFREQ"]:
+            report["CPUFREQ"] = psutil.cpu_freq().max
+        if "CORES" not in report or not report["CORES"]:
+            report["CORES"] = psutil.cpu_count(logical=False)
+        if "THREADS" not in report or not report["THREADS"]:
+            report["THREADS"] = psutil.cpu_count(logical=True)
+        if "OS" not in report or not report["OS"]:
+            report["OS"] = platform.system()
+        if "OSVER" not in report or not report["OSVER"]:
+            report["OSVER"] = platform.version()
+        if "GPUNAME" not in report or not report["GPUNAME"]:
+            report["GPUNAME"] = GPUtil.getGPUs()[0].name
+        if "GPUMEM" not in report or not report["GPUMEM"]:
+            report["GPUMEM"] = GPUtil.getGPUs()[0].memoryTotal
+        if "REPORT" not in report or not report["REPORT"]:
+            report["REPORT"] = []
+        for process in psutil.process_iter(attrs=["pid", "memory_info"]):
+            if process.info["pid"] == game_process.pid:
+                # Genutzter RAM des Prozesses in Bytes
+                ram_usage = process.info["memory_info"].rss  # Resident Set Size
+                RamUsed = ram_usage / (1024**3)  # Umrechnung in GB
+                print(f"RAM usage of Catania.exe: {RamUsed:.2f} GB")
+                break
+        if not RamUsed:
+            RamUsed = "N/A"
+            print("No RAM usage found.")
+        cpu_percent = psutil.cpu_percent()
+        cpu_freq = psutil.cpu_freq().current
+        gpu_percent = GPUtil.getGPUs()[0].load * 100
+        gpu_vram = GPUtil.getGPUs()[0].memoryUsed
+        report["REPORT"].append((cpu_percent,cpu_freq,RamUsed,gpu_percent,gpu_vram))
+        time.sleep(5)
+    save_report()
+
+def open_sample_report():
+    """
+    Opens a sample report in the default text editor.
+    """
+    sample_report_path = os.path.join(reports_dir, "sample_report.csv")
+    with open(sample_report_path, "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["System Report"])
+        writer.writerow(["Generated on:", "2023-10-01 12:00:00"])
+        writer.writerow(["OS:", "Windows 10"])
+        writer.writerow(["OS Version:", "10.0.19042"])
+        writer.writerow(["CPU:", "Intel Core i7-9700K"])
+        writer.writerow(["CPU Cores:", "8"])
+        writer.writerow(["CPU Threads:", "8"])
+        writer.writerow(["CPU Frequency (MHz):", "3600"])
+        writer.writerow(["GPU:", "NVIDIA GeForce RTX 2070"])
+        writer.writerow(["GPU VRAM (MB):", "8192"])
+        writer.writerow([])
+        writer.writerow(["CPU Usage (%)", "CPU Frequency (MHz)", "RAM Usage (MB)", "GPU Usage (%)", "GPU VRAM Usage (MB)"])
+        writer.writerow([15, 3600, 2048, 30, 4096])
+    os.startfile(sample_report_path)
+
+def show_reports_info():
+    """
+    Shows the reports info frame and hides other frames.
+    """
+    patch_notes_frame.pack_forget()
+    settings_frame.pack_forget()
+    onedrive_info_frame.pack_forget()
+    requirements_frame.pack_forget()
+    game_info_frame.pack_forget()
+    usage_info_frame.pack_forget()
+    launcher_info_frame.pack_forget()
+    reports_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
 PNButton = menu.add_cascade("Patch Notes")
@@ -817,6 +963,11 @@ minimize_on_start_checkbox.pack(pady=5, padx=10)
 restore_on_exit_var = ctk.StringVar(value=read_from_ini("Settings", "restore_on_exit", "True"))
 restore_on_exit_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Restore on Game Exit", variable=restore_on_exit_var, onvalue="True", offvalue="False", command=toggle_restore_on_exit)
 restore_on_exit_checkbox.pack(pady=5, padx=10)
+
+# Record Reports Setting
+record_reports_var = ctk.StringVar(value=read_from_ini("Settings", "record_reports", "False"))
+record_reports_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Record Reports", variable=record_reports_var, onvalue="True", offvalue="False", command=toggle_record_reports)
+record_reports_checkbox.pack(pady=5, padx=10)
 
 # Patch Notes Dropdown
 if os.path.exists(versioninfo_dir):
@@ -877,7 +1028,7 @@ launchframe.pack(pady=10, padx=10, fill="x", side="bottom")
 base_dir = os.path.dirname(os.path.abspath(__file__))
 dots_icon_path = os.path.join(base_dir, "icons/Dots/Light.png")
 dots = ctk.CTkImage(Image.open(dots_icon_path))
-launch_button = ctk.CTkButton(launchframe, text="Launch Catania", command=launch_game)
+launch_button = ctk.CTkButton(launchframe, text="Launch Catania", command=show_record_info)
 launch_button.pack(pady=10, padx=10, side="right")
 GameOptions = ctk.CTkButton(launchframe, image=dots, text="", width=20, height=30, fg_color="darkgray", hover_color="gray",cursor="hand2")
 GameOptions.pack(pady=10, padx=5, side="right")
@@ -951,6 +1102,17 @@ verify_button.pack(pady=10, padx=10, side="top")
 verification_back_button = ctk.CTkButton(verification_frame, text="Back", command=show_main_screen)
 verification_back_button.pack(pady=10, padx=10, side="bottom")
 
+# Reports Info Frame
+reports_info_frame = ctk.CTkFrame(app)
+reports_info_title = ctk.CTkLabel(reports_info_frame, text="Reports Information", font=("Arial", 20))
+reports_info_title.pack(pady=10, padx=10, side="top")
+reports_info_text = ctk.CTkLabel(reports_info_frame, text="The reports generated by the launcher include the following information:\n\n- OS and OS Version\n- CPU Model, Cores, Threads, and Frequency\n- GPU Model and VRAM\n- CPU Usage, Frequency, RAM Usage, GPU Usage, and GPU VRAM Usage\n\nThe reports do not include any personal data or identifiable information.", wraplength=500, justify="left")
+reports_info_text.pack(pady=10, padx=10, side="top")
+sample_report_button = ctk.CTkButton(reports_info_frame, text="Open Sample Report", command=open_sample_report)
+sample_report_button.pack(pady=10, padx=10, side="top")
+reports_info_back_button = ctk.CTkButton(reports_info_frame, text="Back", command=show_main_screen)
+reports_info_back_button.pack(pady=10, padx=10, side="bottom")
+
 # About Dropdown
 AboutDropdown = CustomDropdownMenu(widget=AboutButton)
 AboutDropdown.add_option(option="About the game")
@@ -958,7 +1120,21 @@ AboutDropdown.add_separator()
 launcher_submenu = AboutDropdown.add_submenu(submenu_name="About the launcher")
 launcher_submenu.add_option(option="Info", command=show_launcher_info)
 launcher_submenu.add_separator()
+launcher_submenu.add_option(option="Reports", command=show_reports_info)
+launcher_submenu.add_separator()
 launcher_submenu.add_option(option="Author", command=lambda: CTkMessagebox(master=app, title="Author", message="Developed by Horizon Creations", option_1="OK", icon="info"))
+
+# Record Info Frame
+record_info_frame = ctk.CTkFrame(app, fg_color="#2b2b2b")  # Darker gray color
+record_info_label = ctk.CTkLabel(record_info_frame, text="The launcher creates anonymized reports by default. Do you want to continue?", wraplength=500, justify="center")
+record_info_label.pack(pady=10, padx=10, side="top")
+info_button = ctk.CTkButton(record_info_frame, text="More Info", command=open_info_page)
+info_button.pack(pady=10, padx=10, side="left")
+continue_button = ctk.CTkButton(record_info_frame, text="Continue", command=hide_record_info)
+continue_button.pack(pady=10, padx=10, side="right")
+dont_show_again_var = ctk.StringVar(value="False")
+dont_show_again_checkbox = ctk.CTkCheckBox(record_info_frame, text="Don't show this warning again", variable=dont_show_again_var, onvalue="True", offvalue="False")
+dont_show_again_checkbox.pack(pady=10, padx=10, side="bottom")
 
 app.protocol("WM_DELETE_WINDOW", on_closing)
 app.after(100, update_buttons)
