@@ -57,9 +57,9 @@ Tenant_ID = "e26f77c3-1dee-42ba-ae48-7ba44efd4dea"
 Client_ID = "188446fc-2aa3-4557-bf5e-595461d1533d"
 
 #FTP
-FTP_HOST = "deinname.o2internet.de"
-FTP_USER = "ftpuser"
-FTP_PASS = "DEIN_PASSWORT"
+FTP_HOST = "nobbinet.ddnss.de"
+FTP_USER = "ftpuser1"
+FTP_PASS = "access"
 
 game_path:str = ""
 game_process = None
@@ -267,8 +267,8 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
     """
     global is_updating
     is_updating = True
-    filename.pack(pady=5, padx=5, side="top")
     install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
+    filename.pack(pady=5, padx=5, side="top")
     filenamevar.set("Extracting files...")
     if OWinstall_dir:
         install_dir = OWinstall_dir
@@ -395,6 +395,8 @@ def update_buttons(menu:str = ""):
         direntry.pack(pady=10, padx=5, side="left", fill="x", expand=True)
         GameOptions.pack(pady=10, padx=5, side="right")
         copy_button.pack(pady=10, padx=5, side="right")
+        install_button.pack_forget()
+        version_dropdown.pack_forget()
         if not menu == "settings":
             requirements_frame.pack_forget()
             game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -407,6 +409,8 @@ def update_buttons(menu:str = ""):
         direntry.pack_forget()
         copy_button.pack_forget()
         GameOptions.pack_forget()
+        install_button.pack(pady=10, padx=10, side="left")
+        version_dropdown.pack(pady=10, padx=10, side="left")
         if not menu == "settings":
             game_info_frame.pack_forget()
             requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -731,14 +735,24 @@ def toggle_record_reports():
 def open_github_repo():
     webbrowser.open("https://github.com/Charmander12345/GameInstaller", new=2)
 
+available_versions = []
+
 def get_GameVersions():
+    global available_versions
     try:
         ftp = FTP(FTP_HOST)
-        ftp.login(FTP_USER,FTP_PASS)
-        availableVersions = ftp.nlst()
-        # Handle the available versions as needed
+        print("Connected to game build server.")
+        ftp.login(user = FTP_USER, passwd = FTP_PASS)
+        print("Logged in to game build server.")
+        ftp.cwd("ftpshare/builds")
+        print("Changed directory to builds.")
+        available_versions = ftp.nlst()
+        for i in range(len(available_versions)):
+            available_versions[i] = available_versions[i].replace(".zip","")
+        print(available_versions)
+        update_version_dropdown()
     except error_perm:
-        x = ctk_components.CTkNotification(app,"warning2","Unable to login to game build server.","right_top")
+        x = ctk_components.CTkNotification(app,"warning2","Missing permissions to perform action.","right_top")
         time.sleep(2)
         if x.winfo_viewable:
             x.close_notification()
@@ -764,6 +778,51 @@ def get_GameVersions():
             x.close_notification()
     finally:
         ftp.quit()
+
+def update_version_dropdown():
+    global version_dropdown
+    version_dropdown.configure(values=available_versions)
+
+def download_and_install_version(version):
+    global is_updating
+    is_updating = True
+    install_button.pack_forget()
+    version_dropdown.pack_forget()
+    launch_button.pack_forget()
+    install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
+    percentage_label.pack(pady=5, padx=5, side="left")
+    zip_filename = f"{version}.zip"
+    local_zip_path = os.path.join(appdata_dir, zip_filename)
+    
+    try:
+        ftp = FTP(FTP_HOST)
+        ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        ftp.cwd("ftpshare/builds")
+        
+        # Get the size of the file
+        ftp.voidcmd("TYPE I")
+        file_size = ftp.size(zip_filename)
+        
+        with open(local_zip_path, 'wb') as f:
+            def callback(data):
+                f.write(data)
+                progress = f.tell() / file_size
+                progress_var.set(progress)
+                percentage_label_var.set(f"{progress * 100:.2f}%")
+                app.update_idletasks()
+            
+            ftp.retrbinary(f"RETR {zip_filename}", callback)
+        
+        ftp.quit()
+        
+        install_from_zip(local_zip_path)
+        os.remove(local_zip_path)
+    except Exception as e:
+        install_progress.pack_forget()
+        percentage_label.pack_forget()
+        CTkMessagebox(master=app, title="Error", message=f"Failed to download version {version}: {e}", option_1="OK", icon="warning")
+    finally:
+        is_updating = False
 
 def checkKey(key:str):
     if not os.path.exists("keys.txt"):
@@ -1033,6 +1092,8 @@ install_progress = ctk.CTkProgressBar(launchframe, variable=progress_var)
 filenamevar = ctk.StringVar()
 filename = ctk.CTkLabel(launchframe, textvariable=filenamevar,anchor="w",justify="left")
 requirements_label = ctk.CTkLabel(launchframe, text="Checking system requirements...", anchor="w", justify="left")
+percentage_label_var = ctk.StringVar(value="0.00%")
+percentage_label = ctk.CTkLabel(launchframe, textvariable=percentage_label_var, anchor="w", justify="left")
 
 # Popup Menu
 popup_menu = tk.Menu(app, tearoff=0)
@@ -1074,7 +1135,10 @@ game_info_label.pack(pady=10, padx=10, side="top")
 
 game_info_text = ctk.StringVar()
 game_info = get_game_info()
-game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
+if game_info.get("path"):
+    game_info_text.set(f"Game Path: {game_info['path']}\nGame Size: {game_info['size'] / (1024**3):.2f} GB")
+else:
+    game_info_text.set("Game Path: Not available\nGame Size: Not available")
 game_info_details = ctk.CTkLabel(game_info_frame, textvariable=game_info_text, justify="left", anchor="w")
 game_info_details.pack(pady=10, padx=10, side="top")
 
@@ -1131,6 +1195,15 @@ continue_button.pack(pady=10, padx=10, side="right")
 dont_show_again_var = ctk.StringVar(value="False")
 dont_show_again_checkbox = ctk.CTkCheckBox(record_info_frame, text="Don't show this warning again", variable=dont_show_again_var, onvalue="True", offvalue="False")
 dont_show_again_checkbox.pack(pady=10, padx=10, side="bottom")
+
+selected_version = ctk.StringVar(value="Select a version")
+version_dropdown = ctk.CTkOptionMenu(launchframe, variable=selected_version, values=[])
+if not installed:
+    version_dropdown.pack(pady=10, padx=10, side="left")
+
+install_button = ctk.CTkButton(launchframe, text="Install", command=lambda: threading.Thread(target=download_and_install_version, args=(selected_version.get(),)).start())
+if not installed:
+    install_button.pack(pady=10, padx=10, side="left")
 
 app.protocol("WM_DELETE_WINDOW", on_closing)
 app.after(100, update_buttons)
