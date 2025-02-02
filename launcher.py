@@ -27,6 +27,8 @@ import psutil
 import GPUtil
 import platform
 import csv
+import logging
+from datetime import datetime
 
 ctk.set_appearance_mode("dark")
 
@@ -39,9 +41,16 @@ versioninfo_dir = os.path.join(appdata_dir, 'VersionInfo')
 os.makedirs(appdata_dir, exist_ok=True)
 os.makedirs(versioninfo_dir, exist_ok=True)
 
-# Define path for reports
+# Define path for reports and logs
 reports_dir = os.path.join(appdata_dir, 'Reports')
+logs_dir = os.path.join(appdata_dir, 'Logs')
 os.makedirs(reports_dir, exist_ok=True)
+os.makedirs(logs_dir, exist_ok=True)
+
+# Configure logging
+log_filename = datetime.now().strftime("%d.%m.%Y_%H.%M") + ".log"
+log_filepath = os.path.join(logs_dir, log_filename)
+logging.basicConfig(filename=log_filepath, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 config = ConfigParser()
 config.read(config_path)
@@ -82,6 +91,7 @@ def write_to_ini(section, key, value):
     config[section][key] = value
     with open(config_path, "w") as configfile:
         config.write(configfile)
+    logging.info(f"Updated INI file: [{section}] {key} = {value}")
 
 def read_from_ini(section, key, default_value=""):
     if section not in config:
@@ -90,6 +100,7 @@ def read_from_ini(section, key, default_value=""):
         config[section][key] = default_value
         with open(config_path, "w") as configfile:
             config.write(configfile)
+    logging.info(f"Read from INI file: [{section}] {key} = {config[section][key]}")
     return config[section][key]
 
 # Global variable to store report recording status
@@ -163,15 +174,18 @@ def launch_game():
         if os.path.exists(game_executable):
             creationflags = subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS
             game_process = subprocess.Popen([game_executable,"-fromlauncher"],creationflags= subprocess.DETACHED_PROCESS)
+            logging.info(f"Launched game process: {game_process.pid}")
             is_running = True
             update_button_text()
             show_main_screen()
             if record_reports:
                 threading.Thread(target=record_stats,).start()
+                logging.info("Started recording stats.")
             if read_from_ini("Settings", "minimize_on_start", "True") == "True":
                 time.sleep(1)  # Wait for the game to start
                 app.iconify()  # Minimize the launcher window
         else:
+            logging.warning("Game executable not found.")
             CTkMessagebox(master=app, title="Game not found", message= "Couldn't locate the executable.", option_1="OK", icon="warning")
     else:
         if os.path.exists(os.path.expanduser("~/Catania")):
@@ -207,6 +221,7 @@ def install_game(action:str = ""):
         show_main_screen()
         threading.Thread(target=get_GameVersions).start()
         abc = ctk_components.CTkNotification(app,message="Logging in...",side="right_top")
+        logging.info("Fetching available game versions.")
         time.sleep(2)
         abc.close_notification()
     elif action == "manual":
@@ -221,6 +236,25 @@ def install_game(action:str = ""):
         show_install_info()
 
 def update_game():
+    """
+    Updates the game by uninstalling the current version and installing a new version from a selected zip file.
+    This function performs the following steps:
+    1. Prompts the user to select a zip file containing the new game version.
+    2. If no file is selected, the function returns without making any changes.
+    3. Sets the global `is_updating` flag to True and hides various UI elements.
+    4. Displays the filename and progress bar UI elements.
+    5. Reads the installation directory from the configuration file.
+    6. Uninstalls the current game by deleting all files and directories in the installation directory.
+    7. Updates the progress bar during the uninstallation process.
+    8. Installs the new game version from the selected zip file in a separate thread.
+    9. Displays a notification and logs a message indicating the game was updated successfully.
+    10. Resets the global `is_updating` flag to False.
+    Note:
+        This function uses the `filedialog` module to prompt the user for a file,
+        the `os` module to handle file and directory operations,
+        the `logging` module to log messages,
+        and the `threading` module to run the installation in a separate thread.
+    """
     global is_updating
     zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
     if not zip_path:
@@ -236,6 +270,7 @@ def update_game():
 
     #uninstall the game
     install_dir = read_from_ini("Game", "catania_path")
+    logging.info(f"Uninstalling game from {install_dir}")
     if os.path.exists(install_dir):
         for root, dirs, files in os.walk(install_dir, topdown=False):
             total_files = len(files)
@@ -247,8 +282,10 @@ def update_game():
         os.rmdir(install_dir)
     filenamevar.set("Installing new files...")
     progress_var.set(0)
+    logging.info(f"Installing game from {zip_path}")
     threading.Thread(target=install_from_zip, args=(zip_path, read_from_ini("Game", "catania_path"))).start()
     ctk_components.CTkNotification(app, message="Game updated successfully.", side="right_top")
+    logging.info("Game updated successfully.")
     is_updating = False
 
 def install_from_zip(zip_path,OWinstall_dir = ""):
@@ -267,7 +304,8 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
     """
     global is_updating
     is_updating = True
-    install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
+    if not install_progress.winfo_viewable():
+        install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
     filename.pack(pady=5, padx=5, side="top")
     filenamevar.set("Extracting files...")
     if OWinstall_dir:
@@ -275,7 +313,7 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
     else:
         install_dir = os.path.expanduser("~/Catania")
     os.makedirs(install_dir, exist_ok=True)
-
+    logging.info("Extracting files from ZIP archive.")
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         total_files = len(zip_ref.namelist())
         for i, file in enumerate(zip_ref.namelist()):
@@ -283,13 +321,13 @@ def install_from_zip(zip_path,OWinstall_dir = ""):
             zip_ref.extract(file, install_dir)
             progress_var.set((i + 1) / total_files)
             app.update_idletasks()
-            time.sleep(0.01)  # Simulate time delay for progress bar update
 
     write_to_ini("Game", "catania_path", install_dir)
     write_to_ini("Game", "installed", "True")
     install_progress.pack_forget()
     filename.pack_forget()
     update_buttons()
+    logging.info("Extraction completed.")
     is_updating = False
 
 def close_game():
@@ -319,11 +357,13 @@ def close_game():
             try:
                 if proc.info['pid'] == game_process.pid or "Catania.exe" in (proc.info['exe'] or ""):
                     close_notif = ctk_components.CTkNotification(app, message="Closing the game...", side="right_top")
+                    logging.info(f"Closing game process: {game_process.pid}")
                     proc.terminate()  # Versuche, den Prozess zu beenden
                     try:
                         proc.wait(timeout=5)  # Warte, bis der Prozess beendet ist
                     except psutil.TimeoutExpired:
                         proc.kill()  # Erzwinge die Beendigung
+                        logging.warning(f"Game process {game_process.pid} did not terminate gracefully. Forced to kill.")
                     # Beende mögliche Kindprozesse
                     for child in proc.children(recursive=True):
                         child.terminate()
@@ -397,6 +437,7 @@ def update_buttons(menu:str = ""):
         copy_button.pack(pady=10, padx=5, side="right")
         install_button.pack_forget()
         version_dropdown.pack_forget()
+        already_installed_button.pack_forget()
         if not menu == "settings":
             requirements_frame.pack_forget()
             game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -411,6 +452,7 @@ def update_buttons(menu:str = ""):
         GameOptions.pack_forget()
         install_button.pack(pady=10, padx=10, side="left")
         version_dropdown.pack(pady=10, padx=10, side="left")
+        already_installed_button.pack(pady=10, padx=10, side="right")
         if not menu == "settings":
             game_info_frame.pack_forget()
             requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -445,7 +487,7 @@ def show_patch_notes(Version: str = "0.5"):
     usage_info_frame.pack_forget()
     patch_notes_frame.pack(pady=10, padx=10, fill="both", expand=True)
     VersionTitle.configure(text=f"Patch Notes {Version}")
-
+    logging.info(f"Displaying patch notes for version {Version}.")
     # Entferne vorhandene Widgets in VersionInfo
     for widget in VersionInfo.winfo_children():
         widget.destroy()
@@ -464,54 +506,46 @@ def show_patch_notes(Version: str = "0.5"):
     except FileNotFoundError:
         ctk.CTkLabel(VersionInfo,text="Patch notes file not found.",wraplength=600,anchor="w",justify="left").pack(pady=2, padx=5, side="top")
 
-def download_and_extract_github_repo(zip_url, extract_to):
+def updateVersioninfo():
+    """
+    Downloads version information files from an FTP server and updates the progress popup.
+    This function connects to an FTP server using the provided credentials, navigates to the
+    specified directory, and downloads all files listed in that directory. The progress of the
+    download is updated in a progress popup. If an error occurs during the process, an error
+    message is logged and displayed to the user.
+    Globals:
+        progress_var (tkinter.Variable): A variable to track the progress of the download.
+        update_progress_popup (CustomPopup): A custom popup to display the download progress.
+        is_updating (bool): A flag indicating whether the update process is ongoing.
+    Raises:
+        Exception: If there is an error during the FTP connection or file download.
+    Notes:
+        - Ensure that the FTP_HOST, FTP_USER, FTP_PASS, and versioninfo_dir variables are defined.
+        - The function assumes that the `CTkMessagebox` and `app` are properly initialized.
+    """
     global progress_var
     global update_progress_popup
     global is_updating
-    # ZIP-Datei herunterladen
-    response = requests.get(zip_url)
-    if response.status_code == 200:
+    try:
         is_updating = True
-        progress_var.set(.5)
-        with io.BytesIO(response.content) as zip_file:
-            progress_var.set(1)
-            # ZIP-Datei öffnen
-            with zipfile.ZipFile(zip_file) as zf:
-                update_progress_popup.update_label("Extracting files...")
-                update_progress_popup.update_progress(0)
-                # Überprüfen, welche Dateien im Ordner "VersionInfo" liegen
-                files_to_extract = [
-                    file for file in zf.namelist() if file.startswith("GameInstaller-main/VersionInfo/")
-                ]
-                total_files = len(files_to_extract)
-                # Falls der Ordner bereits existiert, löschen
-                if os.path.exists(versioninfo_dir):
-                    shutil.rmtree(versioninfo_dir)
-                # Zielverzeichnis erstellen
-                os.makedirs(versioninfo_dir, exist_ok=True)
-                # Dateien extrahieren
-                for i, file in enumerate(files_to_extract):
-                    zf.extract(file, versioninfo_dir)
-                    progress = (i + 1) / total_files
-                    update_progress_popup.update_progress(progress)
-                    update_progress_popup.update_label(f"Extracting file {i + 1} of {total_files}...")
-                    app.update_idletasks()
+        logging.info("Downloading version info.")
+        ftp = FTP(FTP_HOST)
+        ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        ftp.cwd("ftpshare/versioninfo")
+        versionInfoFiles = ftp.nlst()
 
-        # Dateien ins Zielverzeichnis verschieben
-        extracted_dir = os.path.join(versioninfo_dir, "GameInstaller-main", "VersionInfo")
-        for root, _, files in os.walk(extracted_dir):
-            for file in files:
-                source = os.path.join(root, file)
-                relative_path = os.path.relpath(root, extracted_dir)
-                destination = os.path.join(versioninfo_dir, relative_path, file)
-                os.makedirs(os.path.dirname(destination), exist_ok=True)
-                shutil.move(source, destination)
+        for file in versionInfoFiles:
+            with open(f"{versioninfo_dir}/{file}", "wb") as f:
+                ftp.retrbinary(f"RETR {file}", f.write)
+            update_progress_popup.update_progress(versionInfoFiles.index(file) / len(versionInfoFiles))
+        
 
-        # Ursprünglichen Ordner löschen
-        shutil.rmtree(os.path.join(versioninfo_dir, "GameInstaller-main"))
+    except Exception as e:
+        logging.error(f"Failed to download version info: {e}")
+        CTkMessagebox(master=app, title="Error", message=f"Failed to download version info: {e}", option_1="OK", icon="warning")
+    finally:
         is_updating = False
-    else:
-        CTkMessagebox(master=app, title="Error", message="Failed to download version info.", option_1="OK", icon="warning")
+        ftp.quit()
 
 def show_update_progress():
     global update_progress_popup
@@ -527,7 +561,7 @@ def UpdatePND():
     global progress_var
     global update_progress_popup
     show_update_progress()
-    download_and_extract_github_repo(repo_url, extract_to)
+    updateVersioninfo()
     hide_update_progress()
     if os.path.exists(versioninfo_dir):
         PNDropdown = CustomDropdownMenu(widget=PNButton)
@@ -539,12 +573,34 @@ def UpdatePND():
                 PNDropdown.add_separator()
 
 def uninstall_game():
+    """
+    Uninstalls the game "Catania" from the system.
+
+    This function performs the following steps:
+    1. Prompts the user for confirmation to uninstall the game.
+    2. If confirmed, sets the global `is_updating` flag to True.
+    3. Reads the installation directory from the configuration file.
+    4. If the installation directory exists, it:
+        a. Logs the uninstallation process.
+        b. Calculates the total number of files to be uninstalled.
+        c. Updates the UI to reflect the uninstallation progress.
+        d. Iterates through the files and directories in the installation directory, removing them.
+        e. Removes the installation directory itself.
+    5. Updates the configuration file to reflect that the game is no longer installed.
+    6. Updates the UI buttons to reflect the uninstallation status.
+    7. Logs the successful uninstallation.
+    8. Resets the global `is_updating` flag to False.
+
+    Returns:
+        None
+    """
     global is_updating
     if not messagebox.askyesno("Confirm Uninstall", "Are you sure you want to uninstall Catania?"):
         return
     is_updating = True
     install_dir = read_from_ini("Game", "catania_path")
     if os.path.exists(install_dir):
+        logging.info(f"Uninstalling game from {install_dir}")
         total_files = sum([len(files) for r, d, files in os.walk(install_dir)])
         count = 0
         launch_button.pack_forget()
@@ -568,10 +624,23 @@ def uninstall_game():
     write_to_ini("Game", "catania_path", "")
     write_to_ini("Game", "installed", "False")
     update_buttons()
+    logging.info("Game uninstalled successfully.")
     is_updating = False
 
 def show_popup_menu(event):
     popup_menu.tk_popup(event.x_root, event.y_root)
+
+def uploadLOG():
+    try:
+        ftp = FTP(FTP_HOST)
+        ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        ftp.cwd("ftpshare/logs")
+        with open(log_filepath, "rb") as file:
+            ftp.storbinary(f"STOR {log_filename}", file)
+        ftp.quit()
+    except Exception as e:
+        logging.error(f"Failed to upload log file: {e}")
+        CTkMessagebox(master=app, title="Error", message=f"Failed to upload log file: {e}", option_1="OK", icon="warning")
 
 def on_closing():
     global is_running
@@ -581,6 +650,10 @@ def on_closing():
     elif is_updating:
         CTkMessagebox(master=app, title="Operation in progess", message="Please wait for the launcher to finish the current operation.", option_1="OK", icon="warning")
     else:
+        with open(log_filepath, "r") as file:
+            errors = [line for line in file if "ERROR" in line or "CRITICAL" in line]
+        if errors:
+            uploadLOG()
         app.destroy()
 
 def get_game_info():
@@ -661,6 +734,16 @@ def show_install_info():
     consentframe.pack(pady=10, padx=10, fill="both", expand=True)
 
 def move_game_files(new_path):
+    """
+    Moves the game files from the old path to a new specified path.
+    This function reads the current game path from an INI file, moves all game files to a new directory,
+    updates the progress bar during the move, and updates the INI file with the new path. It also handles
+    UI updates to reflect the moving process and displays notifications upon success or failure.
+    Args:
+        new_path (str): The new directory path where the game files should be moved.
+    Raises:
+        Exception: If an error occurs during the file moving process, an error message is displayed.
+    """
     global is_updating
     old_path = read_from_ini("Game", "catania_path")
     new_game_path = os.path.join(new_path, "CataniaGame")
@@ -738,40 +821,71 @@ def open_github_repo():
 available_versions = []
 
 def get_GameVersions():
+    """
+    Fetches available game versions from the FTP server and updates the version dropdown.
+
+    This function connects to the specified FTP server, navigates to the directory containing
+    game builds, retrieves the list of available versions, and updates the version dropdown
+    in the application. It handles various exceptions that may occur during the process,
+    such as permission errors, server resolution issues, temporary server problems, unexpected
+    server responses, and connection timeouts. Notifications are displayed to the user in case
+    of errors.
+
+    Global Variables:
+        available_versions (list): A list to store the available game versions.
+
+    Exceptions:
+        error_perm: Raised when there are missing permissions to perform the action.
+        socket.gaierror: Raised when the IP address of the game build server could not be resolved.
+        error_temp: Raised when there is a temporary problem on the server.
+        error_reply: Raised when there is an unexpected response from the game build server.
+        TimeoutError: Raised when there is a timeout while attempting to connect.
+
+    Side Effects:
+        Updates the global `available_versions` list.
+        Updates the version dropdown in the application.
+        Logs information and error messages.
+        Displays notifications to the user in case of errors.
+    """
     global available_versions
     try:
         ftp = FTP(FTP_HOST)
-        print("Connected to game build server.")
+        logging.info("Connecting to game build server.")
         ftp.login(user = FTP_USER, passwd = FTP_PASS)
-        print("Logged in to game build server.")
+        logging.info("Connected to game build server.")
         ftp.cwd("ftpshare/builds")
-        print("Changed directory to builds.")
         available_versions = ftp.nlst()
         for i in range(len(available_versions)):
             available_versions[i] = available_versions[i].replace(".zip","")
         print(available_versions)
         update_version_dropdown()
+        logging.info("Fetched available game versions.")
     except error_perm:
+        logging.error("Missing permissions to perform action.")
         x = ctk_components.CTkNotification(app,"warning2","Missing permissions to perform action.","right_top")
         time.sleep(2)
         if x.winfo_viewable:
             x.close_notification()
     except socket.gaierror:
+        logging.error("The IP address of the game build server could not be resolved.")
         x = ctk_components.CTkNotification(app,"warning","The IP address of the game build server could not be resolved.","right_top")
         time.sleep(2)
         if x.winfo_viewable:
             x.close_notification()
     except error_temp:
+        logging.error("Temporary problem on the server.")
         x = ctk_components.CTkNotification(app,"warning2","Temporary problem on the server.","right_top")
         time.sleep(2)
         if x.winfo_viewable:
             x.close_notification()
     except error_reply:
+        logging.error("Unexpected response from game build server.")
         x = ctk_components.CTkNotification(app,"warning","Unexpected response from game build server.","right_top")
         time.sleep(2)
         if x.winfo_viewable:
             x.close_notification()
     except TimeoutError:
+        logging.error("Timeout while attempting to connect.")
         x = ctk_components.CTkNotification(app,"warning","Timeout while attempting to connect.","right_top")
         time.sleep(2)
         if x.winfo_viewable:
@@ -789,39 +903,45 @@ def download_and_install_version(version):
     install_button.pack_forget()
     version_dropdown.pack_forget()
     launch_button.pack_forget()
+    already_installed_button.pack_forget()
     install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
     percentage_label.pack(pady=5, padx=5, side="left")
     zip_filename = f"{version}.zip"
-    local_zip_path = os.path.join(appdata_dir, zip_filename)
+    local_zip_path = os.path.join(os.path.expanduser('~'), 'Downloads', zip_filename)
     
     try:
         ftp = FTP(FTP_HOST)
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
         ftp.cwd("ftpshare/builds")
-        
+        logging.info(f"Downloading version {version}.")
         # Get the size of the file
         ftp.voidcmd("TYPE I")
         file_size = ftp.size(zip_filename)
         
         with open(local_zip_path, 'wb') as f:
             def callback(data):
-                f.write(data)
-                progress = f.tell() / file_size
-                progress_var.set(progress)
-                percentage_label_var.set(f"{progress * 100:.2f}%")
-                app.update_idletasks()
+                if data:
+                    f.write(data)
+                    progress = f.tell() / file_size
+                    progress_var.set(progress)
+                    percentage_label_var.set(f"{progress * 100:.2f}%")
+                    app.update_idletasks()
             
             ftp.retrbinary(f"RETR {zip_filename}", callback)
-        
+        logging.info(f"Version {version} downloaded successfully.")
+        ctk_components.CTkNotification(app, message=f"Version {version} downloaded successfully.", side="right_top")
         ftp.quit()
         
         install_from_zip(local_zip_path)
         os.remove(local_zip_path)
+        logging.info(f"Version {version} installed successfully.")
     except Exception as e:
+        logging.error(f"Failed to download version {version}: {e}")
         install_progress.pack_forget()
         percentage_label.pack_forget()
-        CTkMessagebox(master=app, title="Error", message=f"Failed to download version {version}: {e}", option_1="OK", icon="warning")
+        CTkMessagebox(master=app, title="Error", message=f"Failed to download version {version}: {e}", option_1="OK", icon="warning2")
     finally:
+        percentage_label.pack_forget()
         is_updating = False
 
 def checkKey(key:str):
@@ -970,6 +1090,27 @@ def show_reports_info():
     update_button_text()
     reports_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
+def already_installed():
+    """
+    Opens a file dialog to select the game installation folder and checks if Catania.exe is present.
+    If the executable is found, sets the folder as the installation directory and marks the game as installed.
+    """
+    global game_path
+    folder_selected = filedialog.askdirectory(title="Select Catania Installation Folder")
+    if folder_selected:
+        game_executable = os.path.join(folder_selected, "Catania.exe")
+        if os.path.exists(game_executable):
+            game_path = folder_selected
+            game_path_var.set(game_path)
+            write_to_ini("Game", "catania_path", game_path)
+            write_to_ini("Game", "installed", "True")
+            update_buttons()
+            logging.info(f"Catania installation found and set: {game_path}")
+            CTkMessagebox(master=app, title="Success", message="Catania installation found and set.", option_1="OK", icon="info")
+        else:
+            logging.warning(f"Catania.exe not found in the selected folder: {folder_selected}")
+            CTkMessagebox(master=app, title="Executable Not Found", message="Catania.exe not found in the selected folder.", option_1="OK", icon="warning")
+            
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
 PNButton = menu.add_cascade("Patch Notes")
@@ -1009,6 +1150,10 @@ select_folder_button.pack(side="right")
 save_path_button = ctk.CTkButton(settings_scrollable_frame, text="Save Path", command=save_game_path)
 save_path_button.pack(pady=5, padx=10)
 
+# Appearance Settings
+appearance_label = ctk.CTkLabel(settings_scrollable_frame, text="Appearance Settings", font=("Arial", 16))
+appearance_label.pack(pady=10, padx=10, fill="x")
+
 # Minimize on Start Setting
 minimize_on_start_var = ctk.StringVar(value=read_from_ini("Settings", "minimize_on_start", "True"))
 minimize_on_start_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Minimize on Game Start", variable=minimize_on_start_var, onvalue="True", offvalue="False", command=toggle_minimize_on_start)
@@ -1018,6 +1163,10 @@ minimize_on_start_checkbox.pack(pady=5, padx=10)
 restore_on_exit_var = ctk.StringVar(value=read_from_ini("Settings", "restore_on_exit", "True"))
 restore_on_exit_checkbox = ctk.CTkCheckBox(settings_scrollable_frame, text="Restore on Game Exit", variable=restore_on_exit_var, onvalue="True", offvalue="False", command=toggle_restore_on_exit)
 restore_on_exit_checkbox.pack(pady=5, padx=10)
+
+# Reporting Settings
+reporting_label = ctk.CTkLabel(settings_scrollable_frame, text="Reporting Settings", font=("Arial", 16))
+reporting_label.pack(pady=10, padx=10, fill="x")
 
 # Record Reports Setting
 record_reports_var = ctk.StringVar(value=read_from_ini("Settings", "record_reports", "False"))
@@ -1196,14 +1345,14 @@ dont_show_again_var = ctk.StringVar(value="False")
 dont_show_again_checkbox = ctk.CTkCheckBox(record_info_frame, text="Don't show this warning again", variable=dont_show_again_var, onvalue="True", offvalue="False")
 dont_show_again_checkbox.pack(pady=10, padx=10, side="bottom")
 
+already_installed_button = ctk.CTkButton(launchframe, text="Already Installed?", command=already_installed)
 selected_version = ctk.StringVar(value="Select a version")
 version_dropdown = ctk.CTkOptionMenu(launchframe, variable=selected_version, values=[])
-if not installed:
-    version_dropdown.pack(pady=10, padx=10, side="left")
-
 install_button = ctk.CTkButton(launchframe, text="Install", command=lambda: threading.Thread(target=download_and_install_version, args=(selected_version.get(),)).start())
 if not installed:
+    version_dropdown.pack(pady=10, padx=10, side="left")
     install_button.pack(pady=10, padx=10, side="left")
+    already_installed_button.pack(pady=10, padx=10, side="right")
 
 app.protocol("WM_DELETE_WINDOW", on_closing)
 app.after(100, update_buttons)

@@ -1,9 +1,0 @@
-Welcome to the first version of Catania. This Version is really really simple and is just a base to build upon. It features a main menu with simple widgets. You can also press play to load into a map which is currently only containing a lake. To leave you can press c to open the pause menu and then click exit to main menu. You can also save the game which in this case means just saving the player position. This will automatically be loaded once you press play and will be set to a default value if you don’t have a save or deleted it. 
-
-Things to test out in this version:
-- Starting the game multiple times
-- Loading into the game
-- Trying out the pause menu (c button)
-- Trying the save game mechanic
-- Trying to load the saved game
-- Trying to exit the game using the exit button

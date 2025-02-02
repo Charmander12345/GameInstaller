@@ -1,8 +1,0 @@
-This version mainly focuses on graphical improvements. Tho it is not perfect just jet it is greatly improved. 
-Things to test out in this version:
-- Walk up to the blacksmith and see if you get an interaction notice
-Known Issues:
-- Loading screen might disappear to early which leads to the player being able to see foliage spawn in
-- Scarecrows physics are messed up when game is paused
-- Big parts of the map are not textured (black)
-- Initial spawn location is pretty far away from the village
