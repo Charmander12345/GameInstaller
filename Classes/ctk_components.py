@@ -270,6 +270,51 @@ class CTkNotification(ctk.CTkFrame):
         self.root.unbind("<Configure>")
         self.destroy()
 
+class CTkVersionSelector(ctk.CTkFrame):
+    def __init__(self, master, versions:list[str], installcommand = None, side: str = "right_bottom"):
+        self.root = master
+        self.width = 400
+        self.height = 60
+        super().__init__(self.root, width=self.width, height=self.height, corner_radius=5, border_width=1)
+        self.grid_propagate(True)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self.horizontal, self.vertical = side.split("_")
+
+        self.close_icon = ctk.CTkImage(Image.open(ICON_PATH["close"][0]), Image.open(ICON_PATH["close"][1]), (20, 20))
+
+        self.message_label = ctk.CTkLabel(self, text="Select a Version", font=("", 13), compound="left")
+        #self.message_label.grid(row=0, column=0, sticky="nsw", padx=15, pady=10)
+        self.version = ctk.StringVar(value="Select a Version")
+        self.VersionSelector = ctk.CTkOptionMenu(self, values=versions,variable=self.version)
+        #self.VersionSelector.pack(side="left", padx=15, pady=10)
+        self.VersionSelector.grid(row=0, column=0, sticky="nswe", padx=15, pady=10)
+        self.installButton = ctk.CTkButton(self, text="Install", command=lambda: self.root.after(1,installcommand))
+        #self.installButton.pack(side="right", padx=15, pady=10)
+        self.installButton.grid(row=0, column=1, sticky="nswe", padx=10, pady=10)
+
+        self.close_btn = ctk.CTkButton(self, text="", image=self.close_icon, width=20, height=20, hover=False, fg_color="transparent", command=self.close_notification)
+        self.close_btn.grid(row=0, column=2, sticky="nse", padx=10, pady=10)
+
+        window_position.place_frame(self.root, self, self.horizontal, self.vertical)
+        self.root.bind("<Configure>", self.update_position, add="+")
+
+    def update_position(self, event):
+        window_position.place_frame(self.root, self, self.horizontal, self.vertical)
+        self.update_idletasks()
+        self.root.update_idletasks()
+
+    def setCommand(self, command):
+        self.installButton.configure(command=lambda: self.root.after(1,command))
+
+    def get(self):
+        self.close_notification()
+        return self.version.get()
+
+    def close_notification(self):
+        self.root.unbind("<Configure>")
+        self.destroy()
 
 class CTkCard(ctk.CTkFrame):
     def __init__(self, master: any, border_width=1, corner_radius=5, **kwargs):

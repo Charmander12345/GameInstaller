@@ -1,6 +1,5 @@
 import os
 import customtkinter as ctk
-from customtkinter import CTk
 from configparser import ConfigParser
 import subprocess
 import psutil
@@ -12,15 +11,13 @@ from hPyT import *
 from CTkMenuBar import *
 import tkinter as tk
 from tkinter import messagebox
-import requests
 import zipfile
-import io
 import shutil
 from tkinter import filedialog
 from os.path import exists
 import threading
 import webbrowser
-from ftplib import FTP, error_perm, error_temp, error_proto, error_reply
+from ftplib import FTP, error_perm, error_temp, error_reply
 import socket
 from cpuinfo import get_cpu_info
 import psutil
@@ -44,6 +41,8 @@ os.makedirs(versioninfo_dir, exist_ok=True)
 # Define path for reports and logs
 reports_dir = os.path.join(appdata_dir, 'Reports')
 logs_dir = os.path.join(appdata_dir, 'Logs')
+notifs_dir = os.path.join(appdata_dir, 'Notifications')
+os.makedirs(notifs_dir, exist_ok=True)
 os.makedirs(reports_dir, exist_ok=True)
 os.makedirs(logs_dir, exist_ok=True)
 
@@ -60,10 +59,6 @@ app.title("Catania Launcher")
 app.resizable(False, False)
 #maximize_minimize_button.hide(app)
 window_position.center_window(app, 1000, 600)
-
-#Microsoft Onedrive
-Tenant_ID = "e26f77c3-1dee-42ba-ae48-7ba44efd4dea"
-Client_ID = "188446fc-2aa3-4557-bf5e-595461d1533d"
 
 #FTP
 FTP_HOST = "nobbinet.ddnss.de"
@@ -235,7 +230,7 @@ def install_game(action:str = ""):
     else:
         show_install_info()
 
-def update_game():
+def update_game(mode:str = "auto",version:str = ""):
     """
     Updates the game by uninstalling the current version and installing a new version from a selected zip file.
     This function performs the following steps:
@@ -256,9 +251,10 @@ def update_game():
         and the `threading` module to run the installation in a separate thread.
     """
     global is_updating
-    zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
-    if not zip_path:
-        return
+    if mode == "manual":
+        zip_path = filedialog.askopenfilename(title="Select Catania zip file", filetypes=[("Zip files", "*.zip")])
+        if not zip_path:
+            return
     is_updating = True
     launch_button.pack_forget()
     GameOptions.pack_forget()
@@ -282,8 +278,12 @@ def update_game():
         os.rmdir(install_dir)
     filenamevar.set("Installing new files...")
     progress_var.set(0)
-    logging.info(f"Installing game from {zip_path}")
-    threading.Thread(target=install_from_zip, args=(zip_path, read_from_ini("Game", "catania_path"))).start()
+    if mode == "manual":
+        logging.info(f"Installing game from {zip_path}")
+        threading.Thread(target=install_from_zip, args=(zip_path, read_from_ini("Game", "catania_path"))).start()
+    else:
+        logging.info(f"Installing game from build server")
+        threading.Thread(target=download_and_install_version()).start()
     ctk_components.CTkNotification(app, message="Game updated successfully.", side="right_top")
     logging.info("Game updated successfully.")
     is_updating = False
@@ -433,10 +433,8 @@ def update_buttons(menu:str = ""):
         select_folder_button.configure(state="normal")
         save_path_button.configure(state="normal")
         direntry.pack(pady=10, padx=5, side="left", fill="x", expand=True)
-        GameOptions.pack(pady=10, padx=5, side="right")
+        #GameOptions.pack(pady=10, padx=5, side="right")
         copy_button.pack(pady=10, padx=5, side="right")
-        install_button.pack_forget()
-        version_dropdown.pack_forget()
         already_installed_button.pack_forget()
         if not menu == "settings":
             requirements_frame.pack_forget()
@@ -449,9 +447,7 @@ def update_buttons(menu:str = ""):
         select_folder_button.configure(state="disabled")
         direntry.pack_forget()
         copy_button.pack_forget()
-        GameOptions.pack_forget()
-        install_button.pack(pady=10, padx=10, side="left")
-        version_dropdown.pack(pady=10, padx=10, side="left")
+        #GameOptions.pack_forget()
         already_installed_button.pack(pady=10, padx=10, side="right")
         if not menu == "settings":
             game_info_frame.pack_forget()
@@ -627,19 +623,19 @@ def uninstall_game():
     logging.info("Game uninstalled successfully.")
     is_updating = False
 
-def show_popup_menu(event):
-    popup_menu.tk_popup(event.x_root, event.y_root)
-
 def uploadLOG():
     try:
         ftp = FTP(FTP_HOST)
-        ftp.login(user=FTP_USER, passwd=FTP_PASS)
-        ftp.cwd("ftpshare/logs")
+        code = ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        code = ftp.cwd("ftpshare/logs")
         with open(log_filepath, "rb") as file:
-            ftp.storbinary(f"STOR {log_filename}", file)
+            code = ftp.storbinary(f"STOR {log_filename}", file)
         ftp.quit()
     except Exception as e:
         logging.error(f"Failed to upload log file: {e}")
+        if code == "550":
+            ftp.mkd("ftpshare/logs")
+            uploadLOG()
         CTkMessagebox(master=app, title="Error", message=f"Failed to upload log file: {e}", option_1="OK", icon="warning")
 
 def on_closing():
@@ -653,6 +649,7 @@ def on_closing():
         with open(log_filepath, "r") as file:
             errors = [line for line in file if "ERROR" in line or "CRITICAL" in line]
         if errors:
+            print("Errors found in log file.")
             uploadLOG()
         app.destroy()
 
@@ -820,7 +817,7 @@ def open_github_repo():
 
 available_versions = []
 
-def get_GameVersions():
+def get_GameVersions(mode:str = "install"):
     """
     Fetches available game versions from the FTP server and updates the version dropdown.
 
@@ -849,17 +846,32 @@ def get_GameVersions():
     """
     global available_versions
     try:
-        ftp = FTP(FTP_HOST)
-        logging.info("Connecting to game build server.")
-        ftp.login(user = FTP_USER, passwd = FTP_PASS)
-        logging.info("Connected to game build server.")
-        ftp.cwd("ftpshare/builds")
-        available_versions = ftp.nlst()
-        for i in range(len(available_versions)):
-            available_versions[i] = available_versions[i].replace(".zip","")
-        print(available_versions)
-        update_version_dropdown()
-        logging.info("Fetched available game versions.")
+        if mode == "install":
+            ftp = FTP(FTP_HOST)
+            logging.info("Connecting to game build server.")
+            ftp.login(user = FTP_USER, passwd = FTP_PASS)
+            logging.info("Connected to game build server.")
+            ftp.cwd("ftpshare/builds")
+            available_versions = ftp.nlst()
+            for i in range(len(available_versions)):
+                available_versions[i] = available_versions[i].replace(".zip","")
+            print(available_versions)
+            version_notif = ctk_components.CTkVersionSelector(app, versions=available_versions)
+            version_notif.setCommand(lambda: threading.Thread(target=download_and_install_version, args=(version_notif.get(),)).start())
+            logging.info("Fetched available game versions.")
+        elif mode == "update":
+            ftp = FTP(FTP_HOST)
+            logging.info("Connecting to game build server.")
+            ftp.login(user = FTP_USER, passwd = FTP_PASS)
+            logging.info("Connected to game build server.")
+            ftp.cwd("ftpshare/builds")
+            available_versions = ftp.nlst()
+            for i in range(len(available_versions)):
+                available_versions[i] = available_versions[i].replace(".zip","")
+            print(available_versions)
+            version_notif = ctk_components.CTkVersionSelector(app, versions=available_versions)
+            version_notif.setCommand(lambda: threading.Thread(target=get_GameVersions, args=("auto", version_notif.get())).start())
+            logging.info("Fetched available game versions.")
     except error_perm:
         logging.error("Missing permissions to perform action.")
         x = ctk_components.CTkNotification(app,"warning2","Missing permissions to perform action.","right_top")
@@ -893,15 +905,9 @@ def get_GameVersions():
     finally:
         ftp.quit()
 
-def update_version_dropdown():
-    global version_dropdown
-    version_dropdown.configure(values=available_versions)
-
 def download_and_install_version(version):
     global is_updating
     is_updating = True
-    install_button.pack_forget()
-    version_dropdown.pack_forget()
     launch_button.pack_forget()
     already_installed_button.pack_forget()
     install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
@@ -918,16 +924,16 @@ def download_and_install_version(version):
         ftp.voidcmd("TYPE I")
         file_size = ftp.size(zip_filename)
         
-        with open(local_zip_path, 'wb') as f:
-            def callback(data):
-                if data:
-                    f.write(data)
-                    progress = f.tell() / file_size
-                    progress_var.set(progress)
-                    percentage_label_var.set(f"{progress * 100:.2f}%")
-                    app.update_idletasks()
-            
-            ftp.retrbinary(f"RETR {zip_filename}", callback)
+        f = open(local_zip_path, 'wb')
+        def callback(data):
+            f.write(data)
+            progress = f.tell() / file_size
+            progress_var.set(progress)
+            percentage_label_var.set(f"{progress * 100:.2f}%")
+            app.update_idletasks()
+            print(f"{progress * 100:.2f}%")
+        ftp.retrbinary(f"RETR {zip_filename}", callback)
+        f.close()
         logging.info(f"Version {version} downloaded successfully.")
         ctk_components.CTkNotification(app, message=f"Version {version} downloaded successfully.", side="right_top")
         ftp.quit()
@@ -939,7 +945,7 @@ def download_and_install_version(version):
         logging.error(f"Failed to download version {version}: {e}")
         install_progress.pack_forget()
         percentage_label.pack_forget()
-        CTkMessagebox(master=app, title="Error", message=f"Failed to download version {version}: {e}", option_1="OK", icon="warning2")
+        CTkMessagebox(master=app, title="Error", message=f"Failed to download version {version}: {e}", option_1="OK", icon="cancel")
     finally:
         percentage_label.pack_forget()
         is_updating = False
@@ -1058,22 +1064,25 @@ def open_sample_report():
     Opens a sample report in the default text editor.
     """
     sample_report_path = os.path.join(reports_dir, "sample_report.csv")
-    with open(sample_report_path, "w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["System Report"])
-        writer.writerow(["Generated on:", "2023-10-01 12:00:00"])
-        writer.writerow(["OS:", "Windows 10"])
-        writer.writerow(["OS Version:", "10.0.19042"])
-        writer.writerow(["CPU:", "Intel Core i7-9700K"])
-        writer.writerow(["CPU Cores:", "8"])
-        writer.writerow(["CPU Threads:", "8"])
-        writer.writerow(["CPU Frequency (MHz):", "3600"])
-        writer.writerow(["GPU:", "NVIDIA GeForce RTX 2070"])
-        writer.writerow(["GPU VRAM (MB):", "8192"])
-        writer.writerow([])
-        writer.writerow(["CPU Usage (%)", "CPU Frequency (MHz)", "RAM Usage (MB)", "GPU Usage (%)", "GPU VRAM Usage (MB)"])
-        writer.writerow([15, 3600, 2048, 30, 4096])
-    os.startfile(sample_report_path)
+    if not os.path.exists(sample_report_path):
+        with open(sample_report_path, "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["System Report"])
+            writer.writerow(["Generated on:", "2023-10-01 12:00:00"])
+            writer.writerow(["OS:", "Windows 10"])
+            writer.writerow(["OS Version:", "10.0.19042"])
+            writer.writerow(["CPU:", "Intel Core i7-9700K"])
+            writer.writerow(["CPU Cores:", "8"])
+            writer.writerow(["CPU Threads:", "8"])
+            writer.writerow(["CPU Frequency (MHz):", "3600"])
+            writer.writerow(["GPU:", "NVIDIA GeForce RTX 2070"])
+            writer.writerow(["GPU VRAM (MB):", "8192"])
+            writer.writerow([])
+            writer.writerow(["CPU Usage (%)", "CPU Frequency (MHz)", "RAM Usage (MB)", "GPU Usage (%)", "GPU VRAM Usage (MB)"])
+            writer.writerow([15, 3600, 2048, 30, 4096])
+        os.startfile(sample_report_path)
+    else:
+        os.startfile(sample_report_path)
 
 def show_reports_info():
     """
@@ -1087,7 +1096,6 @@ def show_reports_info():
     game_info_frame.pack_forget()
     usage_info_frame.pack_forget()
     launcher_info_frame.pack_forget()
-    update_button_text()
     reports_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
 def already_installed():
@@ -1110,10 +1118,67 @@ def already_installed():
         else:
             logging.warning(f"Catania.exe not found in the selected folder: {folder_selected}")
             CTkMessagebox(master=app, title="Executable Not Found", message="Catania.exe not found in the selected folder.", option_1="OK", icon="warning")
-            
+
+def ShowNotification(Notfication: str):
+    """
+    Shows a notification message to the user.
+    Args:
+        Notification (str): The notification message to display.
+    """
+    with open(f"{notifs_dir}/{Notfication}.txt","r") as file:
+        content = file.read()
+    CTkMessagebox(master=app, title="Notification", message=content, option_1="OK", icon="warning")
+
+def checkNotifications():
+    """
+    Connects to an FTP server, retrieves notification messages, and updates the UI with the notifications.
+
+    This function performs the following steps:
+    1. Connects to the FTP server using the provided credentials.
+    2. Navigates to the "ftpshare/messages" directory on the FTP server.
+    3. Retrieves the list of message files in the directory.
+    4. Downloads each message file to the local notifications directory.
+    5. Updates the notification button and dropdown menu in the UI with the retrieved messages.
+
+    If an error occurs during the process, it logs the error and displays a warning notification.
+
+    Raises:
+        Exception: If there is an error during the FTP connection or file retrieval process.
+    """
+    try:
+        ftp = FTP(FTP_HOST)
+        ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        ftp.cwd("ftpshare/messages")
+        messages = ftp.nlst()
+        newnotif = False
+        localmessages = os.listdir(notifs_dir)
+        for message in localmessages:
+            if message not in messages:
+                os.remove(f"{notifs_dir}/{message}")
+        if messages:
+            for message in messages:
+                if not message in localmessages:
+                    with open(f"{notifs_dir}/{message}","wb") as file:
+                        ftp.retrbinary(f"RETR {message}", file.write)
+                    newnotif = True
+            notif_button.grid(row=0,column=5)
+            for message in messages:
+                notifDropdown.add_option(option=message.removesuffix(".txt"),command=lambda message=message.removesuffix(".txt"): ShowNotification(message))
+                if len(messages) > 1:
+                    notifDropdown.add_separator()
+            if newnotif:
+                ctk_components.CTkNotification(app,"info","New notifications available.","right_top")
+    except Exception as e:
+        logging.error(f"Failed to download notifications: {e}")
+        ctk_components.CTkNotification(app,"warning","Failed to download notifications.","right_top")
+    finally:
+        ftp.quit()
+
+installed = checkGamePath()
 # Widgets
 menu = CTkMenuBar(app,bg_color="#2b2b2b",pady=5,padx=5,cursor="hand2")
 PNButton = menu.add_cascade("Patch Notes")
+GameButton = menu.add_cascade("Game")
 SettingsButton = menu.add_cascade("Settings")
 AboutButton = menu.add_cascade("About")
 
@@ -1184,6 +1249,18 @@ if os.path.exists(versioninfo_dir):
 else:
     UpdatePND()
 
+# Game Dropdown
+GameDropdown = CustomDropdownMenu(widget=GameButton)
+GameSubmenu = GameDropdown.add_submenu("Update Game")
+GameSubmenu.add_option(option="Launcher download",command=lambda: threading.Thread(target=get_GameVersions(mode="update")).start())
+GameSubmenu.add_separator()
+GameSubmenu.add_option(option="Manual download",command=lambda: threading.Thread(target=install_game("manual")).start())
+GameDropdown.add_separator()
+if not installed:
+    GameDropdown.add_option(option="Already Installed", command=already_installed)
+    GameDropdown.add_separator()
+GameDropdown.add_option(option="Uninstall Game", command=uninstall_game)
+
 # Settings Dropdown
 SettingsDropdown = CustomDropdownMenu(widget=SettingsButton)
 SettingsDropdown.add_option(option="Launcher Settings", command=show_settings)
@@ -1235,20 +1312,14 @@ dots = ctk.CTkImage(Image.open(dots_icon_path))
 launch_button = ctk.CTkButton(launchframe, text="Launch Catania", command=show_record_info)
 launch_button.pack(pady=10, padx=10, side="right")
 GameOptions = ctk.CTkButton(launchframe, image=dots, text="", width=20, height=30, fg_color="darkgray", hover_color="gray",cursor="hand2")
-GameOptions.pack(pady=10, padx=5, side="right")
-GameOptions.bind("<Button-1>", show_popup_menu)
+#GameOptions.pack(pady=10, padx=5, side="right")
+#GameOptions.bind("<Button-1>", show_popup_menu)
 install_progress = ctk.CTkProgressBar(launchframe, variable=progress_var)
 filenamevar = ctk.StringVar()
 filename = ctk.CTkLabel(launchframe, textvariable=filenamevar,anchor="w",justify="left")
 requirements_label = ctk.CTkLabel(launchframe, text="Checking system requirements...", anchor="w", justify="left")
 percentage_label_var = ctk.StringVar(value="0.00%")
 percentage_label = ctk.CTkLabel(launchframe, textvariable=percentage_label_var, anchor="w", justify="left")
-
-# Popup Menu
-popup_menu = tk.Menu(app, tearoff=0)
-#popup_menu.add_command(label="Change Tester Key", command=unverify)
-popup_menu.add_command(label="Update", command=lambda: threading.Thread(target=update_game).start())
-popup_menu.add_command(label="Uninstall", command= lambda: threading.Thread(target=uninstall_game).start())
 
 # Game path entry
 direntry = ctk.CTkEntry(launchframe, textvariable=game_path_var, state="readonly")
@@ -1346,15 +1417,16 @@ dont_show_again_checkbox = ctk.CTkCheckBox(record_info_frame, text="Don't show t
 dont_show_again_checkbox.pack(pady=10, padx=10, side="bottom")
 
 already_installed_button = ctk.CTkButton(launchframe, text="Already Installed?", command=already_installed)
-selected_version = ctk.StringVar(value="Select a version")
-version_dropdown = ctk.CTkOptionMenu(launchframe, variable=selected_version, values=[])
-install_button = ctk.CTkButton(launchframe, text="Install", command=lambda: threading.Thread(target=download_and_install_version, args=(selected_version.get(),)).start())
 if not installed:
-    version_dropdown.pack(pady=10, padx=10, side="left")
-    install_button.pack(pady=10, padx=10, side="left")
     already_installed_button.pack(pady=10, padx=10, side="right")
+
+#Notification
+notif_image = ctk.CTkImage(light_image=Image.open(os.path.join(base_dir,"icons/Bell/Light.png")),dark_image=Image.open(os.path.join(base_dir,"icons/Bell/Dark.png")))
+notif_button = ctk.CTkButton(menu,image=notif_image,text="",fg_color="transparent",bg_color="transparent",cursor="hand2",width=20,height=20)
+notifDropdown = CustomDropdownMenu(widget=notif_button)
 
 app.protocol("WM_DELETE_WINDOW", on_closing)
 app.after(100, update_buttons)
 app.after(1000,lambda: threading.Thread(target=UpdatePND).start())
+app.after(1000,lambda: threading.Thread(target=checkNotifications).start())
 app.mainloop()
