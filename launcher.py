@@ -17,7 +17,7 @@ from tkinter import filedialog
 from os.path import exists
 import threading
 import webbrowser
-from ftplib import FTP, error_perm, error_temp, error_reply
+from ftplib import FTP, FTP_TLS, error_perm, error_temp, error_reply
 import socket
 from cpuinfo import get_cpu_info
 import psutil
@@ -69,7 +69,9 @@ game_path:str = ""
 game_process = None
 is_running = False
 is_updating = False
+is_downloading = False
 installed = False
+downloadProgress = 0
 repo_url = "https://github.com/Charmander12345/GameInstaller/archive/refs/heads/main.zip"
 extract_to = "VersionInfo"
 report = {}
@@ -419,7 +421,7 @@ def update_buttons(menu:str = ""):
     """
     Updates the state and visibility of various buttons in the game installer UI based on whether the game is installed and verified.
     """
-    global installed, is_verified
+    global installed, is_verified, is_downloading
     installed = checkGamePath()
     is_verified = read_from_ini("Tester", "verified", "False") == "True"
     if installed:
@@ -440,7 +442,7 @@ def update_buttons(menu:str = ""):
             requirements_frame.pack_forget()
             game_info_frame.pack(pady=10, padx=10, fill="both", expand=True)
     else:
-        if not launch_button.winfo_viewable():
+        if not launch_button.winfo_viewable() and read_from_ini("Game", "is_updating", "False") == "False":
             launch_button.pack(pady=10, padx=10, side="right")
         launch_button.configure(text="Install Catania", fg_color="#3B8ED0", hover_color="#36719F", command=install_game)
         save_path_button.configure(state="disabled")
@@ -448,7 +450,26 @@ def update_buttons(menu:str = ""):
         direntry.pack_forget()
         copy_button.pack_forget()
         #GameOptions.pack_forget()
-        already_installed_button.pack(pady=10, padx=10, side="right")
+        if read_from_ini("Game", "is_updating", "False") == "False":
+            already_installed_button.pack(pady=10, padx=10, side="right")
+            launch_button.pack(pady=10, padx=10, side="right")
+            install_progress.pack_forget()
+            filename.pack_forget()
+            percentage_label.pack_forget()
+            PauseDownloadButton.pack_forget()
+            CancelDownloadButton.pack_forget()
+        else:
+            already_installed_button.pack_forget()
+            launch_button.pack_forget()
+            progress_var.set(0)
+            install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
+            percentage_label.pack(pady=5, padx=5, side="right")
+            if is_downloading:
+                PauseDownloadButton.configure(image=PauseImage)
+            else:
+                PauseDownloadButton.configure(image=PlayImage)
+            PauseDownloadButton.pack(pady=5, padx=5, side="right")
+            CancelDownloadButton.pack(pady=5, padx=5, side="right")
         if not menu == "settings":
             game_info_frame.pack_forget()
             requirements_frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -525,8 +546,10 @@ def updateVersioninfo():
     try:
         is_updating = True
         logging.info("Downloading version info.")
-        ftp = FTP(FTP_HOST)
+        ftp = FTP_TLS(FTP_HOST)
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        #ftp.prot_p()
+        ftp.set_pasv(True)
         ftp.cwd("ftpshare/versioninfo")
         versionInfoFiles = ftp.nlst()
 
@@ -625,15 +648,16 @@ def uninstall_game():
 
 def uploadLOG():
     try:
-        ftp = FTP(FTP_HOST)
+        ftp = FTP_TLS(FTP_HOST)
         code = ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        #ftp.prot_p()
         code = ftp.cwd("ftpshare/logs")
         with open(log_filepath, "rb") as file:
             code = ftp.storbinary(f"STOR {log_filename}", file)
         ftp.quit()
     except Exception as e:
         logging.error(f"Failed to upload log file: {e}")
-        if code == "550":
+        if code and code == "550":
             ftp.mkd("ftpshare/logs")
             uploadLOG()
         CTkMessagebox(master=app, title="Error", message=f"Failed to upload log file: {e}", option_1="OK", icon="warning")
@@ -847,9 +871,11 @@ def get_GameVersions(mode:str = "install"):
     global available_versions
     try:
         if mode == "install":
-            ftp = FTP(FTP_HOST)
+            ftp = FTP_TLS(FTP_HOST)
             logging.info("Connecting to game build server.")
             ftp.login(user = FTP_USER, passwd = FTP_PASS)
+            #ftp.prot_p()
+            ftp.set_pasv(True)
             logging.info("Connected to game build server.")
             ftp.cwd("ftpshare/builds")
             available_versions = ftp.nlst()
@@ -860,9 +886,11 @@ def get_GameVersions(mode:str = "install"):
             version_notif.setCommand(lambda: threading.Thread(target=download_and_install_version, args=(version_notif.get(),)).start())
             logging.info("Fetched available game versions.")
         elif mode == "update":
-            ftp = FTP(FTP_HOST)
+            ftp = FTP_TLS(FTP_HOST)
             logging.info("Connecting to game build server.")
             ftp.login(user = FTP_USER, passwd = FTP_PASS)
+            ftp.prot_p()
+            ftp.set_pasv(True)
             logging.info("Connected to game build server.")
             ftp.cwd("ftpshare/builds")
             available_versions = ftp.nlst()
@@ -905,35 +933,49 @@ def get_GameVersions(mode:str = "install"):
     finally:
         ftp.quit()
 
-def download_and_install_version(version):
-    global is_updating
+def download_and_install_version(version, offset:int = 0):
+    global is_updating, Downloadfile, ftp, is_downloading, Version, local_zip_path
+    Version = version
     is_updating = True
     launch_button.pack_forget()
     already_installed_button.pack_forget()
     install_progress.pack(pady=5, padx=5, side="left", fill="x", expand=True)
     percentage_label.pack(pady=5, padx=5, side="left")
-    zip_filename = f"{version}.zip"
+    zip_filename = f"{version}.download"
     local_zip_path = os.path.join(os.path.expanduser('~'), 'Downloads', zip_filename)
     
     try:
-        ftp = FTP(FTP_HOST)
+        ftp = FTP_TLS(FTP_HOST)
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        print(ftp.getwelcome())
         ftp.cwd("ftpshare/builds")
         logging.info(f"Downloading version {version}.")
         # Get the size of the file
         ftp.voidcmd("TYPE I")
-        file_size = ftp.size(zip_filename)
+        file_size = ftp.size(f"{version}.zip")
         
-        f = open(local_zip_path, 'wb')
+        Downloadfile = open(local_zip_path, 'wb')
         def callback(data):
-            f.write(data)
-            progress = f.tell() / file_size
-            progress_var.set(progress)
-            percentage_label_var.set(f"{progress * 100:.2f}%")
-            app.update_idletasks()
-            print(f"{progress * 100:.2f}%")
-        ftp.retrbinary(f"RETR {zip_filename}", callback)
-        f.close()
+            global is_downloading, Downloadfile, downloadProgress
+            if is_downloading and Downloadfile:
+                Downloadfile.write(data)
+                progress = Downloadfile.tell() / file_size
+                downloadProgress = Downloadfile.tell()
+                progress_var.set(progress)
+                percentage_label_var.set(f"{progress * 100:.2f}%")
+                app.update_idletasks()
+    
+        is_downloading = True
+        PauseDownloadButton.configure(image=PauseImage)
+        PauseDownloadButton.pack(pady=5, padx=5, side="right")
+        CancelDownloadButton.pack(pady=5, padx=5, side="right")
+        ftp.retrbinary(f"RETR {version}.zip", callback, rest=int(offset))
+        os.rename(local_zip_path, os.path.join(os.path.expanduser('~'), 'Downloads', f"{version}.zip"))
+        local_zip_path = os.path.join(os.path.expanduser('~'), 'Downloads', f"{version}.zip")
+        is_downloading = False
+        PauseDownloadButton.pack_forget()
+        CancelDownloadButton.pack_forget()
+        Downloadfile.close()
         logging.info(f"Version {version} downloaded successfully.")
         ctk_components.CTkNotification(app, message=f"Version {version} downloaded successfully.", side="right_top")
         ftp.quit()
@@ -942,13 +984,46 @@ def download_and_install_version(version):
         os.remove(local_zip_path)
         logging.info(f"Version {version} installed successfully.")
     except Exception as e:
-        logging.error(f"Failed to download version {version}: {e}")
-        install_progress.pack_forget()
-        percentage_label.pack_forget()
-        CTkMessagebox(master=app, title="Error", message=f"Failed to download version {version}: {e}", option_1="OK", icon="cancel")
+        if is_downloading:
+            logging.error(f"Failed to download version {version}: {e}")
+            install_progress.pack_forget()
+            percentage_label.pack_forget()
+            CTkMessagebox(master=app, title="Error", message=f"Failed to download version {version}: {e}", option_1="OK", icon="cancel")
+        else:
+            pass
     finally:
+        write_to_ini("Game", "is_updating", "False")
         percentage_label.pack_forget()
         is_updating = False
+
+def CancelDownload():
+    global is_updating, Downloadfile, ftp, is_downloading, local_zip_path
+    is_updating = False
+    is_downloading = False
+    time.sleep(1)
+    ftp.quit()
+    Downloadfile.close()
+    os.remove(local_zip_path)
+    install_progress.pack_forget()
+    percentage_label.pack_forget()
+    update_buttons()
+    CTkMessagebox(master=app, title="Download Cancelled", message="The download has been cancelled.", option_1="OK", icon="info")
+
+def PauseDownload():
+    global is_updating
+    global Downloadfile
+    global ftp
+    global Version
+    global is_downloading
+    global downloadProgress
+    is_updating = False
+    is_downloading = False
+    ftp.quit()
+    Downloadfile.close()
+    write_to_ini("Game", "offset", str(downloadProgress))
+    write_to_ini("Game", "version", Version)
+    write_to_ini("Game", "is_updating", "True")
+    update_buttons()
 
 def checkKey(key:str):
     if not os.path.exists("keys.txt"):
@@ -1146,8 +1221,9 @@ def checkNotifications():
         Exception: If there is an error during the FTP connection or file retrieval process.
     """
     try:
-        ftp = FTP(FTP_HOST)
+        ftp = FTP_TLS(FTP_HOST)
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        #ftp.prot_p()
         ftp.cwd("ftpshare/messages")
         messages = ftp.nlst()
         newnotif = False
@@ -1249,18 +1325,6 @@ if os.path.exists(versioninfo_dir):
 else:
     UpdatePND()
 
-# Game Dropdown
-GameDropdown = CustomDropdownMenu(widget=GameButton)
-GameSubmenu = GameDropdown.add_submenu("Update Game")
-GameSubmenu.add_option(option="Launcher download",command=lambda: threading.Thread(target=get_GameVersions(mode="update")).start())
-GameSubmenu.add_separator()
-GameSubmenu.add_option(option="Manual download",command=lambda: threading.Thread(target=install_game("manual")).start())
-GameDropdown.add_separator()
-if not installed:
-    GameDropdown.add_option(option="Already Installed", command=already_installed)
-    GameDropdown.add_separator()
-GameDropdown.add_option(option="Uninstall Game", command=uninstall_game)
-
 # Settings Dropdown
 SettingsDropdown = CustomDropdownMenu(widget=SettingsButton)
 SettingsDropdown.add_option(option="Launcher Settings", command=show_settings)
@@ -1320,6 +1384,11 @@ filename = ctk.CTkLabel(launchframe, textvariable=filenamevar,anchor="w",justify
 requirements_label = ctk.CTkLabel(launchframe, text="Checking system requirements...", anchor="w", justify="left")
 percentage_label_var = ctk.StringVar(value="0.00%")
 percentage_label = ctk.CTkLabel(launchframe, textvariable=percentage_label_var, anchor="w", justify="left")
+CancelImage = ctk.CTkImage(Image.open(os.path.join(base_dir, "icons/close_white.png")))
+CancelDownloadButton = ctk.CTkButton(launchframe, text="", image=CancelImage, width=20,height=20, fg_color="transparent", command=lambda: threading.Thread(target=CancelDownload).start())
+PauseImage = ctk.CTkImage(Image.open(os.path.join(base_dir, "icons/Pause_white.png")))
+PlayImage = ctk.CTkImage(Image.open(os.path.join(base_dir, "icons/Play_white.png")))
+PauseDownloadButton = ctk.CTkButton(launchframe, text="", height=20,width=20,fg_color="transparent",command=PauseDownload)
 
 # Game path entry
 direntry = ctk.CTkEntry(launchframe, textvariable=game_path_var, state="readonly")
@@ -1419,6 +1488,15 @@ dont_show_again_checkbox.pack(pady=10, padx=10, side="bottom")
 already_installed_button = ctk.CTkButton(launchframe, text="Already Installed?", command=already_installed)
 if not installed:
     already_installed_button.pack(pady=10, padx=10, side="right")
+# Game Dropdown
+if installed:
+    GameDropdown = CustomDropdownMenu(widget=GameButton)
+    GameDropdown.add_option(option="Uninstall Game", command=uninstall_game)
+    GameSubmenu = GameDropdown.add_submenu("Update Game")
+    GameSubmenu.add_option(option="Launcher download",command=lambda: threading.Thread(target=get_GameVersions(mode="update")).start())
+    GameSubmenu.add_separator()
+    GameSubmenu.add_option(option="Manual download",command=lambda: threading.Thread(target=install_game("manual")).start())
+    GameDropdown.add_separator()
 
 #Notification
 notif_image = ctk.CTkImage(light_image=Image.open(os.path.join(base_dir,"icons/Bell/Light.png")),dark_image=Image.open(os.path.join(base_dir,"icons/Bell/Dark.png")))
